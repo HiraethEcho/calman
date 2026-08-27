@@ -54,6 +54,17 @@
 - [ ] Write integration tests (`tests/`) covering core commands.
 - [ ] Polish `--help` output.
 
+### 2.4 Report Engine & Relations
+- [x] Config schema: `[report.<name>]` (columns/format/sort/filter), `[defaults] default_report`.
+- [x] Builtin reports `ls`/`list`/`next`; bare `calman` → `next`.
+- [x] Report renderer: fields (`id,status,summary,desc,tags,due,pri,type,source`), formats (`relative/countdown/iso/truncate`), `width`, `sort` (incl. `/` break).
+- [x] Nerdfont icons, 3-level fallback (column `icons` > `[icons]` global > builtin).
+- [x] Global row-level color rules `[[color]]`, first-match, `fg/bg/bold/underline/italic/dim`.
+- [x] Builtin virtual tags: `OVERDUE`, `DONE`≡`COMPLETED`, `CANCELLED`, `IN-PROCESS`, `TAGGED`/`UNTAGGED`, `TODO`/`EVENT`, `SCHEDULED`.
+- [x] `rel:<parent-id>` attribute on `add`/`modify` → `RELATED-TO` (`RELTYPE=PARENT`).
+- [x] `RELATED-TO` read/write in `IcsStorage`; `related_to` persisted in JSONL.
+- [x] Modular config: `include` merge in `config.rs` + `config.example.toml` / `report.example.toml` / `theme.example.toml`.
+
 ---
 
 ## Phase 3: TUI Complete Implementation

@@ -40,6 +40,11 @@ post_hook = "echo 'done'"
 ```
 
 ### 1.2 Field Details
+- **`include`** (list of strings): extra TOML files merged before the main one, for modular configs (`report.toml`, `theme.toml` …).
+  - Paths relative to the main config file's directory; absolute and `~/`-expanded paths allowed.
+  - Merge: tables recurse; scalars/lists in the main file win; keys missing from the main file are taken from the include.
+  - One level only — included files cannot contain `include`.
+  - Ship‑with examples: `config.example.toml`, `report.example.toml`, `theme.example.toml`.
 - **`defaults.write_source`**: Must be a single valid `source.name`.
 - **`contexts`**:
   - If a context is not defined, it falls back to **all `[[source]]` entries** (for `sync`, entries without `sync.cmd` are skipped).

@@ -79,6 +79,10 @@ pub fn resolve_sources(
 }
 
 /// Merge all tasks from `sources` into `Row`s with sequential short IDs.
+///
+/// Taskwarrior-style numbering: the **oldest** task gets ID 1. Rows are
+/// ordered by `created_at` (ties broken by UID) before IDs are assigned, so
+/// IDs stay stable across sessions regardless of storage iteration order.
 pub fn load_merged(sources: &[Source]) -> Result<Vec<Row>> {
     let mut rows = Vec::new();
     for src in sources {
@@ -87,11 +91,20 @@ pub fn load_merged(sources: &[Source]) -> Result<Vec<Row>> {
             let mut t = t.clone();
             t.source = src.name.clone();
             rows.push(Row {
-                id: rows.len() + 1,
+                id: 0,
                 source: src.name.clone(),
                 task: t,
             });
         }
+    }
+    rows.sort_by(|a, b| {
+        a.task
+            .created_at
+            .cmp(&b.task.created_at)
+            .then_with(|| a.task.uid.cmp(&b.task.uid))
+    });
+    for (i, r) in rows.iter_mut().enumerate() {
+        r.id = i + 1;
     }
     Ok(rows)
 }
@@ -123,4 +136,40 @@ pub fn resolve_targets(
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::SourceType;
+    use tempfile::tempdir;
+
+    fn source(dir: &std::path::Path, name: &str) -> Source {
+        Source {
+            name: name.into(),
+            source_type: SourceType::Jsonl,
+            location: dir.display().to_string(),
+            sync: None,
+        }
+    }
+
+    #[test]
+    fn ids_assigned_oldest_first() {
+        let dir = tempdir().unwrap();
+        let mut st = crate::storage::jsonl::JsonlStorage::open(dir.path()).unwrap();
+        let mut first = Task::new("work", "newer");
+        let mut second = Task::new("work", "older");
+        // older created earlier: rewind its timestamp manually
+        second.created_at = first.created_at - chrono::Duration::days(1);
+        st.add(second).unwrap();
+        st.add(first).unwrap();
+        drop(st);
+
+        let rows = load_merged(&[source(dir.path(), "work")]).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].id, 1);
+        assert_eq!(rows[0].task.summary, "older");
+        assert_eq!(rows[1].id, 2);
+        assert_eq!(rows[1].task.summary, "newer");
+    }
 }

@@ -1,0 +1,76 @@
+# ============================================================================
+# calman — 报告配置示例 (report.example.toml)
+#
+# 被 config.toml 的 include 引用。复制为 report.toml (或保持此名) 并按需修改。
+# 内容:
+#   [report.<name>]  报告定义 (同名覆盖内置 ls/list/next)
+#   [icons]          nerdfont 图标全局覆盖
+#   [[color]]        全局行级颜色规则
+#
+# 内置报告已存在: ls (短列) / list (长列) / next (默认)。这里展示同名覆盖写法,
+# 删除不需要的块即用内置。
+# ============================================================================
+
+# ---------------------------------------------------------------- [report.ls]
+[report.ls]
+filter = "status:active"             # 报告默认过滤, 与命令行过滤 AND
+sort = ["due+", "created+"]          # key+ 升序 / key- 降序; 尾部 / = 分组空行
+columns = [
+  { field = "id",      label = "ID",   width = 4 },
+  { field = "type",    label = "TYPE", icon = true },
+  { field = "status",  label = "ST",   icon = true },
+  { field = "due",     label = "DUE",  format = "relative" },
+  { field = "summary", label = "SUMMARY" },
+]
+
+# -------------------------------------------------------------- [report.list]
+[report.list]
+filter = "-status:completed -status:cancelled"
+sort = ["status-", "pri-", "due+"]
+columns = [
+  { field = "id",      label = "ID",     width = 4 },
+  { field = "type",    label = "TYPE",   icon = true },
+  { field = "status",  label = "STATUS", icon = true },
+  { field = "pri",     label = "PRI" },
+  { field = "due",     label = "DUE",    format = "relative" },
+  { field = "tags",    label = "TAGS" },
+  { field = "summary", label = "SUMMARY", format = "truncate", width = 40 },
+  { field = "desc",    label = "DESC" },
+]
+
+# ------------------------------------------------------------- [report.next]
+[report.next]
+filter = "status:active"
+sort = ["due+", "pri-"]
+columns = [
+  { field = "id",      label = "ID",   width = 4 },
+  { field = "type",    label = "TYPE", icon = true },
+  { field = "due",     label = "DUE",  format = "countdown" },
+  { field = "summary", label = "SUMMARY" },
+]
+
+# 可用字段 (field): id status summary desc tags due pri type source
+#   summary = CalDAV SUMMARY; desc = DESCRIPTION; due 列对 event 显示 dtstart
+# 可用格式 (format): relative | countdown | iso | truncate
+#   truncate 配合 width 使用 (超宽截断加 …)
+# width = 列最小宽度
+# icon = true 时 status/type 列渲染 nerdfont 图标
+#
+# 每列可单独覆盖图标 (优先级: 列 icons > [icons] 全局 > 内置默认):
+#   { field = "status", label = "ST", icon = true,
+#     icons = { completed = "✔", pending = "◌" } }
+
+# ------------------------------------------------------------------- [icons]
+# 全局图标覆盖 (可选; 缺失的键回落到内置默认)
+[icons]
+[icons.status]                       # 内置: pending=○ in-progress=● completed=✓ cancelled=✕
+pending = "○"
+in-progress = "●"
+completed = "✓"
+cancelled = "✕"
+
+[icons.type]                         # 内置: todo=󰄰 event=󰃭
+todo = "󰄰"
+event = "󰃭"
+
+# 行级颜色规则在 theme.example.toml 的 [theme] / [theme.color] 中定义:

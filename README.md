@@ -174,6 +174,35 @@ Empty list → all sources. Per-invocation override: `calman source:work list`.
 
 `source:<name>` is a Taskwarrior-style attribute usable anywhere; comma-separate for multiple sources.
 
+## Source collections
+
+A source may hold multiple collections (e.g. a Radicale server synced by vdirsync/pimsync to `radicale/{collection}/item.ics`). Reference a specific collection path-like:
+
+```
+source:<name>/<collection>
+```
+
+- `source:personal/calendars` → `.../radicale/calendars/item.ics`
+- `source:work/My Projects` → `.../work/My Projects/item.ics`
+
+Spaces in collection names: quote them → `source:personal/"My Calendars"`.
+
+Configure a source once with a root `path`; calman recursively discovers every `item.ics` beneath it:
+
+```toml
+[[source]]
+name = "personal"
+path = "/home/user/.contacts/radicale"
+
+[[source]]
+name = "work"
+path = "/home/user/.contacts/work-cal"
+```
+
+- Recursive scanning: all nested directories are scanned.
+- Collection name = relative path from `path` to the `item.ics` parent.
+- Naming conflicts are resolved by the source prefix (`personal/calendars` vs `work/calendars`).
+
 ## Project docs
 
 - `SPEC.md` — goals + tech stack

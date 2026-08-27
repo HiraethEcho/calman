@@ -1,44 +1,29 @@
-//! `list` subcommand handler (default report).
+//! Report subcommand handler (default output of `calman`).
+//!
+//! `ls`/`list`/`next` (bare `calman` → `[defaults] default_report`, default
+//! `next`). Renders via `report` engine with filters, sort, icons, colors.
 
 use crate::args::ParsedArgs;
-use crate::cli::{Row, resolve_sources};
+use crate::cli::{resolve_sources, Row};
 use crate::config::{Config, ContextKind};
 use crate::filter::Filter;
+use crate::report::{self, Report};
 use anyhow::Result;
-use chrono::Local;
 
-pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
+pub fn run(conf: &Config, q: &ParsedArgs, report_name: &str) -> Result<()> {
     let override_ = (!q.sources.is_empty()).then_some(q.sources.as_slice());
     let sources = resolve_sources(conf, override_, ContextKind::Cli)?;
     let rows = crate::cli::load_merged(&sources)?;
-    let filter = Filter::from_parsed(q);
-    let rows: Vec<&Row> = rows.iter().filter(|r| filter.matches(&r.task)).collect();
-    print_table(&rows);
-    Ok(())
-}
 
-fn print_table(rows: &[&Row]) {
-    if rows.is_empty() {
-        println!("(no tasks)");
-        return;
-    }
-    for r in rows {
-        let t = &r.task;
-        let status = format!("{:?}", t.status).to_lowercase();
-        let prio = t.priority.map(|p| p.to_string()).unwrap_or_default();
-        let due = if t.is_event() {
-            t.dtstart
-                .map(|d| d.with_timezone(&Local).format("%Y-%m-%d").to_string())
-                .unwrap_or_default()
-        } else {
-            t.due
-                .map(|d| d.with_timezone(&Local).format("%Y-%m-%d").to_string())
-                .unwrap_or_default()
-        };
-        let tags = t.tags.join(",");
-        println!(
-            "{:<4} {:<12} {:<3} {:<10} {:<20} {}",
-            r.id, status, prio, due, tags, t.summary
-        );
-    }
+    let cli_filter = Filter::from_parsed(q);
+    let report = Report::resolve(report_name, conf);
+    let report_filter = report.filter()?;
+
+    let mut selected: Vec<&Row> = rows
+        .iter()
+        .filter(|r| cli_filter.matches(&r.task) && report_filter.matches(&r.task))
+        .collect();
+    report::sort_rows(&mut selected, &report.sort);
+    print!("{}", report::render(conf, &report, &selected));
+    Ok(())
 }

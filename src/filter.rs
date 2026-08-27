@@ -15,6 +15,14 @@ pub struct Filter {
     pending: bool,
     completed: bool,
     overdue: bool,
+    active: bool,
+    done: bool,
+    cancelled: bool,
+    in_progress: bool,
+    tagged: bool,
+    untagged: bool,
+    scheduled: bool,
+    r#type: Option<String>,
     priority: Option<u8>,
     tags: Vec<String>,
     anti_tags: Vec<String>,
@@ -37,6 +45,14 @@ impl Filter {
             pending: q.pending,
             completed: q.completed,
             overdue: q.overdue,
+            active: q.active,
+            done: q.done,
+            cancelled: q.cancelled,
+            in_progress: q.in_progress,
+            tagged: q.tagged,
+            untagged: q.untagged,
+            scheduled: q.scheduled,
+            r#type: q.r#type.clone(),
             priority: q.priority,
             tags: q.tags.clone(),
             anti_tags: q.anti_tags.clone(),
@@ -58,6 +74,42 @@ impl Filter {
         }
         if self.completed && !t.status.is_done() {
             return false;
+        }
+        if self.active && t.status.is_done() {
+            return false;
+        }
+        if self.done && t.status != TaskStatus::Completed {
+            return false;
+        }
+        if self.cancelled && t.status != TaskStatus::Cancelled {
+            return false;
+        }
+        if self.in_progress && t.status != TaskStatus::InProgress {
+            return false;
+        }
+        if self.tagged && t.tags.is_empty() {
+            return false;
+        }
+        if self.untagged && !t.tags.is_empty() {
+            return false;
+        }
+        if self.scheduled && !t.is_event() {
+            return false;
+        }
+        if let Some(ty) = &self.r#type {
+            match ty.as_str() {
+                "todo" => {
+                    if t.is_event() {
+                        return false;
+                    }
+                }
+                "event" => {
+                    if !t.is_event() {
+                        return false;
+                    }
+                }
+                _ => {}
+            }
         }
         if self.overdue {
             let past_due = t.due.is_some_and(|d| d < Utc::now());
@@ -155,6 +207,28 @@ mod tests {
         assert!(!f.matches(&in_progress()));
         let g = Filter::from_parsed(&q(&["-home"]));
         assert!(g.matches(&in_progress()));
+    }
+
+    #[test]
+    fn virtual_tags() {
+        let mut t = Task::new("work", "x");
+        t.status = TaskStatus::InProgress;
+        assert!(Filter::from_parsed(&q(&["+IN-PROCESS"])).matches(&t));
+        assert!(Filter::from_parsed(&q(&["+ACTIVE"])).matches(&t));
+        assert!(!Filter::from_parsed(&q(&["+DONE"])).matches(&t));
+        t.status = TaskStatus::Completed;
+        assert!(Filter::from_parsed(&q(&["+DONE"])).matches(&t));
+        assert!(Filter::from_parsed(&q(&["status:active"])).matches(&Task::new("work", "y")));
+    }
+
+    #[test]
+    fn type_filter() {
+        let t = Task::new("work", "x");
+        assert!(Filter::from_parsed(&q(&["type:todo"])).matches(&t));
+        let mut e = Task::new("work", "y");
+        e.dtstart = Some(Utc::now());
+        assert!(Filter::from_parsed(&q(&["type:event"])).matches(&e));
+        assert!(!Filter::from_parsed(&q(&["type:event"])).matches(&t));
     }
 
     #[test]

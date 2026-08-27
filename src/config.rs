@@ -5,6 +5,7 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -62,10 +63,53 @@ impl Source {
     }
 }
 
-/// `[defaults]` — the default write target for `add`.
+/// `[defaults]` — the default write target and report for `add` / bare `calman`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Defaults {
     pub write_source: String,
+    /// Name of the default report run by bare `calman` (default `next`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_report: Option<String>,
+}
+
+/// A single report column.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ColumnCfg {
+    pub field: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<usize>,
+    /// `relative | countdown | iso | truncate`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    /// Render a nerdfont glyph instead of text (status/type only).
+    #[serde(default)]
+    pub icon: bool,
+    /// Per-column icon overrides (keyed by value, e.g. `completed = "✔"`).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub icons: HashMap<String, String>,
+}
+
+/// `[report.<name>]` — a user report definition.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReportCfg {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
+    /// Sort keys: `key+`, `key-`, trailing `/` inserts a break line.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sort: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub columns: Vec<ColumnCfg>,
+}
+
+/// `[icons]` — global nerdfont icon overrides for status/type.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IconsCfg {
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub status: HashMap<String, String>,
+    #[serde(default, rename = "type", skip_serializing_if = "HashMap::is_empty")]
+    pub r#type: HashMap<String, String>,
 }
 
 /// `[contexts]` — default source lists per context.
@@ -97,8 +141,11 @@ pub struct DateConfig {
 /// `[ui]` — TUI settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiConfig {
+    #[serde(default)]
     pub theme: String,
+    #[serde(default)]
     pub vim_keys: bool,
+    #[serde(default)]
     pub default_filter: String,
 }
 
@@ -111,6 +158,10 @@ pub struct LocaleConfig {
 /// Root config document.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
+    /// Extra TOML files to merge (paths relative to this file, `~/` ok).
+    /// Merged first; values here take precedence.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub include: Vec<String>,
     #[serde(default)]
     pub defaults: Defaults,
     #[serde(default)]
@@ -123,6 +174,32 @@ pub struct Config {
     pub locale: LocaleConfig,
     #[serde(default, rename = "source")]
     pub sources: Vec<Source>,
+    #[serde(default, rename = "report")]
+    pub reports: HashMap<String, ReportCfg>,
+    #[serde(default)]
+    pub icons: IconsCfg,
+    /// `[theme]` palette (used by the Phase-3 TUI).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<ThemeCfg>,
+}
+
+/// `[theme]` — named palette + taskwarrior-style color rules for reports.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThemeCfg {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// `rule.precedence.color` — comma-separated rule order, first match wins.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "rule.precedence.color"
+    )]
+    pub precedence: Option<String>,
+    /// `color.<rule> = "<fg> [on <bg>] [bold|underline|inverse|...]"`.
+    /// Supported rules: deleted completed active overdue due.today due
+    /// blocked blocking scheduled tagged uda.priority.L/M/H.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty", rename = "color")]
+    pub colors: HashMap<String, String>,
 }
 
 fn default_workweek_end() -> String {
@@ -173,8 +250,10 @@ impl Default for LocaleConfig {
 impl Default for Config {
     fn default() -> Self {
         Config {
+            include: Vec::new(),
             defaults: Defaults {
                 write_source: "work".to_string(),
+                default_report: None,
             },
             // Empty contexts → fall back to all (selected) sources per DESIGN §1.2.
             contexts: Contexts::default(),
@@ -187,6 +266,9 @@ impl Default for Config {
                 location: "~/.local/share/calman/work/".to_string(),
                 sync: None,
             }],
+            reports: HashMap::new(),
+            icons: IconsCfg::default(),
+            theme: None,
         }
     }
 }
@@ -211,7 +293,29 @@ impl Config {
         }
         let content =
             fs::read_to_string(path).with_context(|| format!("read config {}", path.display()))?;
-        toml::from_str(&content).with_context(|| format!("parse config {}", path.display()))
+        let mut value: toml::Value = toml::from_str(&content)
+            .with_context(|| format!("parse config {}", path.display()))?;
+
+        // Merge `include` files (relative to this config's dir) beneath us:
+        // included files fill missing keys; main-file values win.
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let includes = value
+            .get("include")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        for inc in includes {
+            if let Some(rel) = inc.as_str() {
+                let inc_path = resolve_include(parent, rel);
+                let inc_text = fs::read_to_string(&inc_path)
+                    .with_context(|| format!("read include {}", inc_path.display()))?;
+                let inc_value: toml::Value = toml::from_str(&inc_text)
+                    .with_context(|| format!("parse include {}", inc_path.display()))?;
+                value = merge(value, inc_value);
+            }
+        }
+
+        Config::deserialize(value).with_context(|| format!("parse config {}", path.display()))
     }
 
     /// Atomically persist the config (tmp file + rename).
@@ -301,6 +405,39 @@ pub fn default_config_path() -> Result<PathBuf> {
     Ok(base.join(CONFIG_DIR).join(CONFIG_FILE))
 }
 
+/// Resolve an include path: absolute, `~/`-expanded, or relative to the
+/// config file's directory.
+fn resolve_include(base: &Path, raw: &str) -> PathBuf {
+    let p = if raw.starts_with('/') {
+        PathBuf::from(raw)
+    } else {
+        base.join(raw)
+    };
+    expand_tilde(p.to_str().unwrap_or(raw))
+}
+
+/// Merge `inc` into `main`: tables recurse, scalars/lists in `main` win,
+/// keys missing from `main` are taken from `inc`.
+fn merge(main: toml::Value, inc: toml::Value) -> toml::Value {
+    match (main, inc) {
+        (toml::Value::Table(mut m), toml::Value::Table(i)) => {
+            for (k, iv) in i {
+                match m.get_mut(&k) {
+                    Some(mv) if mv.is_table() && iv.is_table() => {
+                        *mv = merge(mv.clone(), iv);
+                    }
+                    Some(_) => {} // main wins for scalars/lists
+                    None => {
+                        m.insert(k, iv);
+                    }
+                }
+            }
+            toml::Value::Table(m)
+        }
+        (m, _) => m,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,8 +445,10 @@ mod tests {
 
     fn cfg() -> Config {
         Config {
+            include: Vec::new(),
             defaults: Defaults {
                 write_source: "work".into(),
+                default_report: None,
             },
             contexts: Contexts {
                 cli: vec!["work".into(), "personal".into()],
@@ -319,6 +458,9 @@ mod tests {
             date: DateConfig::default(),
             ui: UiConfig::default(),
             locale: LocaleConfig::default(),
+            reports: HashMap::new(),
+            icons: IconsCfg::default(),
+            theme: None,
             sources: vec![
                 Source {
                     name: "work".into(),
@@ -398,5 +540,53 @@ mod tests {
         let home = std::env::var("HOME").unwrap();
         assert_eq!(expand_tilde("~/x/y"), PathBuf::from(home).join("x/y"));
         assert_eq!(expand_tilde("/abs/path"), PathBuf::from("/abs/path"));
+    }
+
+    #[test]
+    fn include_files_are_merged() {
+        let dir = tempdir().unwrap();
+        let main = dir.path().join("config.toml");
+        fs::write(
+            &main,
+            r#"include = ["report.toml", "theme.toml"]
+[defaults]
+write_source = "work"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("report.toml"),
+            r#"[report.next]
+filter = "status:active"
+sort = ["due+"]
+columns = [
+  { field = "id", label = "ID" },
+]
+[icons.status]
+pending = "○"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("theme.toml"),
+            r#"[ui]
+theme = "dark"
+[theme]
+name = "dark"
+"rule.precedence.color" = "completed,overdue"
+[theme.color]
+completed = "gray10 on gray2"
+overdue = "inverse"
+"#,
+        )
+        .unwrap();
+
+        let cfg = Config::load_from(&main).unwrap();
+        assert!(cfg.reports.contains_key("next"));
+        assert_eq!(cfg.icons.status.get("pending").map(|s| s.as_str()), Some("○"));
+        assert_eq!(cfg.ui.theme, "dark");
+        let theme = cfg.theme.unwrap();
+        assert_eq!(theme.precedence.as_deref(), Some("completed,overdue"));
+        assert_eq!(theme.colors.get("completed").map(|s| s.as_str()), Some("gray10 on gray2"));
     }
 }

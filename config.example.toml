@@ -1,0 +1,70 @@
+# ============================================================================
+# calman — 主配置示例 (main configuration example)
+#
+# 使用: 将本文件复制到 ~/.config/calman/config.toml (或 $XDG_CONFIG_HOME/
+#       calman/config.toml), 连同 report.example.toml / theme.example.toml
+#       一起复制, 按需修改后保存。
+#
+# 模块化配置 (include):
+#   - report.example.toml → [report.*] 报告 / [[color]] 颜色规则 / [icons] 图标
+#   - theme.example.toml  → [ui] 界面行为   / [theme] TUI 调色板
+#   - 路径相对本文件所在目录; 也支持绝对路径或 ~/ 开头 (如 "~/calman/report.toml")
+#   - 合并规则: include 文件先加载, 本文件的值优先 (主文件胜出)
+#   - include 只支持一层, 被包含文件里不能再写 include
+# ============================================================================
+
+# 引用的模块文件 (可改名, 改名后同步修改此项)
+include = ["report.example.toml", "theme.example.toml"]
+
+# ---------------------------------------------------------------- [defaults]
+# 全局默认值
+[defaults]
+write_source = "work"                # `add` 写入的默认 source 名 (必填)
+default_report = "next"              # 裸 `calman` 运行的报告: "ls" | "list" | "next"
+
+# ---------------------------------------------------------------- [contexts]
+# 各命令上下文默认使用哪些 source (空列表 = 全部)
+[contexts]
+cli  = ["work", "personal"]          # list / count / done / delete / modify
+sync = ["work"]                      # sync; 空 = 所有带 sync.cmd 的 source
+tui  = ["work", "personal"]          # TUI 启动时显示; 空 = 全部
+
+# ------------------------------------------------------------------- [date]
+# 日期解析引擎设置
+[date]
+workweek_end = "17:00"               # eoww (工作周结束) 的截止时刻
+week_start = "monday"                # 一周第一天: monday | sunday
+default_start_time = "09:00"         # modify 加 start: 但只给日期时用的时刻
+default_event_duration = "1h"        # event 无 end:/duration: 时的默认时长
+
+# ---------------------------------------------------------------------- [ui]
+# 界面行为见 theme.example.toml; 也可在此处覆盖 (主文件优先)
+
+# ------------------------------------------------------------------ [locale]
+[locale]
+language = "en"                      # en | zh-CN
+
+# ------------------------------------------------------------------ [source]
+# 数据源。type:
+#   "jsonl"   — 单文件 tasks.jsonl, git 友好
+#   "ics"     — 每任务一个 .ics (VTODO/VEVENT), CalDAV/vdir 兼容
+#   "ics-dir" — Radicale/vdirsync 多 collection 目录, 递归发现 item.ics
+[[source]]
+name = "work"                        # 唯一名称, write_source/contexts 引用
+type = "jsonl"
+location = "~/.local/share/calman/work/"
+
+[source.sync]                        # 可选: 外部同步命令链
+pre_hook = "git pull --rebase origin main"
+cmd = "git add . && git commit -m 'calman sync' && git push"
+post_hook = "echo 'synced'"
+
+[[source]]
+name = "personal"
+type = "ics-dir"
+location = "~/.contacts/radicale"
+# 递归发现子目录里的 item.ics; collection 名 = 相对 location 的目录路径
+# 引用: source:work/collection 或 source:personal/"My Calendars"
+
+# 报告 / 图标 → report.example.toml
+# 行级颜色规则 → theme.example.toml ([theme] / [theme.color], custom.theme 格式)

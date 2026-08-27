@@ -34,3 +34,15 @@ It follows the Unix philosophy: **do one thing and do it well** — provide a fi
 - **External sync**: Through `pre_hook`, `cmd`, `post_hook` calling external tools (e.g., `git`, `pimsync`, `rclone`), with `{location}` placeholder substitution.
 - **CLI experience**: Short‑ID system, natural‑language dates (`due:today`, `eow`, `eond`, etc.), predefined filters (`+OVERDUE`), `count` subcommand.
 - **TUI experience**: Left‑right two‑panel layout (list + preview/edit), supports both Vim‑style and arrow‑key keybindings, settings overlay persists to config.
+
+## 5. Decisions
+
+- **CLI habits** follow taskwarrior; **internal semantics** follow CalDAV/iCalendar (RFC 5545).
+- **Reports**: `ls`/`list`/`next`, configured in `config.toml` under `[report.<name>]`; bare `calman` → `[defaults] default_report` (default `next`).
+- **Report schema**: `columns[]` (field, label, width, format, icon), `sort` (`key+`/`key-`, trailing `/` break), `filter`.
+- **Fields**: `id, status, summary, desc, tags, due, pri, type, source`. `summary` = CalDAV `SUMMARY`, `desc` = `DESCRIPTION` (two separate fields).
+- **Icons**: nerdfont; fallback column `icons` > global `[icons]` > builtin defaults.
+- **Colors**: taskwarrior-style theme rules in `[theme.color]`, row-level, ordered by `"rule.precedence.color"`; styles `fg [on bg] [bold|underline|italic|dim|inverse]`.
+- **Builtin virtual tags**: `OVERDUE`, `DONE`≡`COMPLETED`, `CANCELLED`, `IN-PROCESS`, `TAGGED`/`UNTAGGED`, `TODO`/`EVENT`, `SCHEDULED` (event = `DTSTART`). No `WAITING`; `DELETED` is local‑only.
+- **Relations**: `rel:<parent-id>` on `add`/`modify` → `RELATED-TO` (`RELTYPE=PARENT`); child stores parent UID.
+- **Delete** = hard delete locally, no CalDAV mapping.

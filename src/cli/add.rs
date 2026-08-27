@@ -36,6 +36,10 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
     task.description = q.description.clone();
     task.location = q.location.clone();
     task.rrule = q.repeat.clone();
+    if let Some(rel) = &q.rel {
+        let targets = crate::cli::resolve_targets(conf, None, std::slice::from_ref(rel))?;
+        task.related_to = targets.first().map(|(uid, _)| uid.clone());
+    }
 
     if let Some(start_str) = &q.start {
         if q.due.is_some() {

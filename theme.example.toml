@@ -1,0 +1,65 @@
+# ============================================================================
+# calman — 主题配置示例 (theme.example.toml)
+#
+# 被 config.toml 的 include 引用。复制为 theme.toml (或保持此名) 并按需修改。
+# 内容:
+#   [ui]     界面行为设置
+#   [theme]  报告行级颜色规则 (taskwarrior custom.theme 格式) + 调色板
+#
+# 颜色规则完全照搬 taskwarrior custom.theme 的键与语义 (仅需支持到下列配置):
+#   "rule.precedence.color" = 逗号分隔的匹配优先级, 第一条命中生效
+#   "color.<rule>"          = 样式串: "fg [on bg] [bold|underline|inverse|...]"
+#
+# 规则语义:
+#   deleted     本地硬删除, 无对应状态 → 永不匹配
+#   completed   STATUS:COMPLETED
+#   active      进行中 (STATUS:IN-PROCESS)
+#   overdue     due 已过且未完成
+#   due.today   due 是今天
+#   due         有 due (todo)
+#   blocked     父 todo (被其它任务的 related_to 引用)
+#   blocking    子 todo (自身有 related_to)
+#   scheduled   event (有 dtstart)
+#   tagged      有 tags
+#   uda.priority.L/M/H   优先级 1/5/9
+#
+# ============================================================================
+
+# ----------------------------------------------------------------------- [ui]
+[ui]
+theme = "default"                    # 主题名, 对应 [theme].name
+vim_keys = true                      # true = Vim 键位 (j/k/gg/G), false = 方向键
+default_filter = "all"               # TUI 启动默认过滤: "todo" | "event" | "all"
+
+# -------------------------------------------------------------------- [theme]
+[theme]
+name = "default"                     # 与 [ui].theme 对应
+
+# 规则匹配优先级: 从前往后, 第一条同时"被定义且命中"的规则生效
+"rule.precedence.color" = "deleted,completed,active,overdue,due.today,due,uda.,blocked,blocking,scheduled,tagged"
+
+# 颜色规则 (对照 ~/.config/task/custom.theme)
+[theme.color]
+deleted = "gray8 on gray1"           # 无 deleted 状态, 保留仅为格式兼容
+completed = "gray10 on gray2"
+active = "underline"
+overdue = "inverse"
+"due.today" = "underline"
+due = "bold"
+blocked = "gray18"                   # 父 todo
+"uda.priority.L" = "gray14"
+"uda.priority.M" = "green"
+"uda.priority.H" = "yellow"
+blocking = "gray23"                  # 子 todo
+scheduled = "gray22"
+tagged = "gray21 bold"
+
+# 样式语法: fg [on bg] [bold|underline|italic|dim|inverse]
+# 颜色名: black red green yellow blue magenta cyan white,
+#         bright-black … bright-white, gray / grey,
+#         gray0 … gray23 (256 色阶)
+
+# TUI 调色板 (Phase 3 预留, 可选)
+# [theme.palette]
+# header = "blue"
+# selected = "cyan"

@@ -38,6 +38,8 @@ pub enum DueMod {
 #[derive(Debug, Clone, Default)]
 pub struct ParsedArgs {
     pub cmd: Option<Command>,
+    /// Listing subcommand name (`ls`/`list`/`next`) when `cmd == List`.
+    pub report_name: Option<String>,
     pub sources: Vec<String>,
     pub ids: Vec<String>,
     pub text: String,
@@ -50,6 +52,15 @@ pub struct ParsedArgs {
     pub overdue: bool,
     pub pending: bool,
     pub completed: bool,
+    pub active: bool,
+    pub done: bool,
+    pub cancelled: bool,
+    pub in_progress: bool,
+    pub tagged: bool,
+    pub untagged: bool,
+    pub scheduled: bool,
+    pub r#type: Option<String>,
+    pub rel: Option<String>,
     pub start: Option<String>,
     pub end: Option<String>,
     pub location: Option<String>,
@@ -85,9 +96,10 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
         }
 
         if q.cmd.is_none()
-            && let Some(cmd) = command_word(tok)
+            && let Some((cmd, report)) = command_word(tok)
         {
             q.cmd = Some(cmd);
+            q.report_name = report;
             continue;
         }
 
@@ -114,7 +126,15 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
             q.due = Some(parse_datetime(rest)?);
             q.due_mod = DueMod::On;
         } else if let Some(rest) = lower.strip_prefix("status:") {
-            q.status = Some(parse_status(rest)?);
+            if rest == "active" {
+                q.active = true;
+            } else {
+                q.status = Some(parse_status(rest)?);
+            }
+        } else if let Some(rest) = lower.strip_prefix("type:") {
+            q.r#type = Some(rest.to_string());
+        } else if let Some(rest) = lower.strip_prefix("rel:") {
+            q.rel = Some(rest.to_string());
         } else if let Some(rest) = lower.strip_prefix("start:") {
             q.start = Some(rest.to_string());
         } else if let Some(rest) = lower.strip_prefix("end:") {
@@ -137,7 +157,15 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
             match lower.as_str() {
                 "+overdue" => q.overdue = true,
                 "+pending" => q.pending = true,
-                "+completed" => q.completed = true,
+                "+completed" | "+done" => q.completed = true,
+                "+active" => q.active = true,
+                "+cancelled" | "+canceled" => q.cancelled = true,
+                "+in-progress" | "+inprogress" | "+in-process" | "+inprocess" | "+started" => q.in_progress = true,
+                "+tagged" => q.tagged = true,
+                "+untagged" => q.untagged = true,
+                "+scheduled" => q.scheduled = true,
+                "+todo" => q.r#type = Some("todo".to_string()),
+                "+event" => q.r#type = Some("event".to_string()),
                 _ => q.tags.push(tok[1..].to_string()),
             }
         } else if tok.starts_with('-') && tok.len() > 1 {
@@ -152,18 +180,21 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
     Ok(q)
 }
 
-fn command_word(tok: &str) -> Option<Command> {
-    match tok.to_ascii_lowercase().as_str() {
-        "add" => Some(Command::Add),
-        "list" | "ls" => Some(Command::List),
-        "done" | "complete" => Some(Command::Done),
-        "delete" | "rm" => Some(Command::Delete),
-        "modify" | "mod" => Some(Command::Modify),
-        "count" => Some(Command::Count),
-        "sync" => Some(Command::Sync),
-        "tui" => Some(Command::Tui),
-        _ => None,
-    }
+fn command_word(tok: &str) -> Option<(Command, Option<String>)> {
+    let (cmd, report) = match tok.to_ascii_lowercase().as_str() {
+        "add" => (Command::Add, None),
+        "list" => (Command::List, Some("list".to_string())),
+        "ls" => (Command::List, Some("ls".to_string())),
+        "next" => (Command::List, Some("next".to_string())),
+        "done" | "complete" => (Command::Done, None),
+        "delete" | "rm" => (Command::Delete, None),
+        "modify" | "mod" => (Command::Modify, None),
+        "count" => (Command::Count, None),
+        "sync" => (Command::Sync, None),
+        "tui" => (Command::Tui, None),
+        _ => return None,
+    };
+    Some((cmd, report))
 }
 
 fn parse_priority(v: &str) -> Result<u8> {
@@ -173,7 +204,7 @@ fn parse_priority(v: &str) -> Result<u8> {
 fn parse_status(v: &str) -> Result<TaskStatus> {
     Ok(match v.to_ascii_lowercase().as_str() {
         "pending" => TaskStatus::Pending,
-        "in-progress" | "inprogress" | "started" => TaskStatus::InProgress,
+        "in-progress" | "inprogress" | "in-process" | "inprocess" | "started" => TaskStatus::InProgress,
         "completed" | "done" => TaskStatus::Completed,
         "cancelled" | "canceled" => TaskStatus::Cancelled,
         _ => bail!("unknown status `{v}`"),

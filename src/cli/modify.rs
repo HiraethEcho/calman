@@ -35,6 +35,7 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         && q.duration.is_none()
         && !q.allday
         && q.alert.is_none()
+        && q.rel.is_none()
     {
         bail!("no changes specified");
     }
@@ -68,6 +69,13 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
     };
 
     let default_duration = parse_duration(&conf.date.default_event_duration)?;
+    let related = match &q.rel {
+        Some(rel) => {
+            let targets = crate::cli::resolve_targets(conf, None, std::slice::from_ref(rel))?;
+            targets.first().map(|(uid, _)| uid.clone())
+        }
+        None => None,
+    };
 
     for (uid, source) in crate::cli::resolve_targets(conf, override_, &q.ids)? {
         let src = conf
@@ -92,6 +100,7 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
                     end,
                     duration: dur,
                     alert,
+                    related: related.clone(),
                     default_duration,
                 },
             )
@@ -117,6 +126,7 @@ struct Upd {
     end: Option<DateValue>,
     duration: Option<Duration>,
     alert: Option<i64>,
+    related: Option<String>,
     default_duration: Duration,
 }
 
@@ -152,6 +162,9 @@ fn apply(t: &mut Task, u: &Upd) -> Result<()> {
     }
     if let Some(v) = &u.description {
         t.description = Some(v.clone());
+    }
+    if let Some(r) = &u.related {
+        t.related_to = Some(r.clone());
     }
     if let Some(secs) = u.alert {
         t.alarm_before = Some(secs);
