@@ -61,6 +61,16 @@ pub struct ParsedArgs {
     pub scheduled: bool,
     pub r#type: Option<String>,
     pub rel: Option<String>,
+    pub anti_pending: bool,
+    pub anti_active: bool,
+    pub anti_completed: bool,
+    pub anti_cancelled: bool,
+    pub anti_in_progress: bool,
+    pub anti_overdue: bool,
+    pub anti_tagged: bool,
+    pub anti_untagged: bool,
+    pub anti_scheduled: bool,
+    pub anti_type: Option<String>,
     pub start: Option<String>,
     pub end: Option<String>,
     pub location: Option<String>,
@@ -169,7 +179,22 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
                 _ => q.tags.push(tok[1..].to_string()),
             }
         } else if tok.starts_with('-') && tok.len() > 1 {
-            q.anti_tags.push(tok[1..].to_string());
+            match &lower[1..] {
+                "overdue" => q.anti_overdue = true,
+                "completed" | "done" => q.anti_completed = true,
+                "cancelled" | "canceled" => q.anti_cancelled = true,
+                "active" => q.anti_active = true,
+                "in-progress" | "inprogress" | "in-process" | "inprocess" | "started" => {
+                    q.anti_in_progress = true
+                }
+                "pending" => q.anti_pending = true,
+                "tagged" => q.anti_tagged = true,
+                "untagged" => q.anti_untagged = true,
+                "scheduled" => q.anti_scheduled = true,
+                "todo" => q.anti_type = Some("todo".to_string()),
+                "event" => q.anti_type = Some("event".to_string()),
+                _ => q.anti_tags.push(tok[1..].to_string()),
+            }
         } else {
             push_text(&mut q, tok);
         }

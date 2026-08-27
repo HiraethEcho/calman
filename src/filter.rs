@@ -23,6 +23,16 @@ pub struct Filter {
     untagged: bool,
     scheduled: bool,
     r#type: Option<String>,
+    anti_pending: bool,
+    anti_active: bool,
+    anti_completed: bool,
+    anti_cancelled: bool,
+    anti_in_progress: bool,
+    anti_overdue: bool,
+    anti_tagged: bool,
+    anti_untagged: bool,
+    anti_scheduled: bool,
+    anti_type: Option<String>,
     priority: Option<u8>,
     tags: Vec<String>,
     anti_tags: Vec<String>,
@@ -53,6 +63,16 @@ impl Filter {
             untagged: q.untagged,
             scheduled: q.scheduled,
             r#type: q.r#type.clone(),
+            anti_pending: q.anti_pending,
+            anti_active: q.anti_active,
+            anti_completed: q.anti_completed,
+            anti_cancelled: q.anti_cancelled,
+            anti_in_progress: q.anti_in_progress,
+            anti_overdue: q.anti_overdue,
+            anti_tagged: q.anti_tagged,
+            anti_untagged: q.anti_untagged,
+            anti_scheduled: q.anti_scheduled,
+            anti_type: q.anti_type.clone(),
             priority: q.priority,
             tags: q.tags.clone(),
             anti_tags: q.anti_tags.clone(),
@@ -95,6 +115,51 @@ impl Filter {
         }
         if self.scheduled && !t.is_event() {
             return false;
+        }
+        if self.anti_pending && t.status.is_active() {
+            return false;
+        }
+        if self.anti_active && !t.status.is_done() {
+            return false;
+        }
+        if self.anti_completed && t.status == TaskStatus::Completed {
+            return false;
+        }
+        if self.anti_cancelled && t.status == TaskStatus::Cancelled {
+            return false;
+        }
+        if self.anti_in_progress && t.status == TaskStatus::InProgress {
+            return false;
+        }
+        if self.anti_overdue {
+            let past_due = t.due.is_some_and(|d| d < Utc::now());
+            if past_due && !t.status.is_done() {
+                return false;
+            }
+        }
+        if self.anti_tagged && !t.tags.is_empty() {
+            return false;
+        }
+        if self.anti_untagged && t.tags.is_empty() {
+            return false;
+        }
+        if self.anti_scheduled && t.is_event() {
+            return false;
+        }
+        if let Some(ty) = &self.anti_type {
+            match ty.as_str() {
+                "todo" => {
+                    if !t.is_event() {
+                        return false;
+                    }
+                }
+                "event" => {
+                    if t.is_event() {
+                        return false;
+                    }
+                }
+                _ => {}
+            }
         }
         if let Some(ty) = &self.r#type {
             match ty.as_str() {
@@ -229,6 +294,20 @@ mod tests {
         e.dtstart = Some(Utc::now());
         assert!(Filter::from_parsed(&q(&["type:event"])).matches(&e));
         assert!(!Filter::from_parsed(&q(&["type:event"])).matches(&t));
+    }
+
+    #[test]
+    fn anti_virtual_tag() {
+        let mut t = Task::new("work", "x");
+        t.due = Some(Utc::now() - Duration::hours(1)); // overdue
+        assert!(!Filter::from_parsed(&q(&["-OVERDUE"])).matches(&t));
+        assert!(Filter::from_parsed(&q(&["-DONE"])).matches(&t));
+        t.status = TaskStatus::Completed;
+        assert!(!Filter::from_parsed(&q(&["-DONE"])).matches(&t));
+        let mut e = Task::new("work", "y");
+        e.dtstart = Some(Utc::now());
+        assert!(!Filter::from_parsed(&q(&["-EVENT"])).matches(&e));
+        assert!(Filter::from_parsed(&q(&["-EVENT"])).matches(&t));
     }
 
     #[test]

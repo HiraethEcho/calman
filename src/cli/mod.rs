@@ -172,4 +172,33 @@ mod tests {
         assert_eq!(rows[1].id, 2);
         assert_eq!(rows[1].task.summary, "newer");
     }
+
+    #[test]
+    fn ids_not_shifted_by_filter() {
+        let dir = tempdir().unwrap();
+        let mut st = crate::storage::jsonl::JsonlStorage::open(dir.path()).unwrap();
+        for (i, sum) in ["a", "b", "c"].iter().enumerate() {
+            let mut t = Task::new("work", *sum);
+            t.created_at = t.created_at + chrono::Duration::hours(i as i64);
+            st.add(t).unwrap();
+        }
+        // complete the middle task
+        let rows_all = load_merged(&[source(dir.path(), "work")]).unwrap();
+        let uid_b = rows_all[1].task.uid.clone();
+        let mut st = crate::storage::jsonl::JsonlStorage::open(dir.path()).unwrap();
+        st.update(&uid_b, |t| {
+            t.status = crate::model::TaskStatus::Completed;
+            Ok(())
+        })
+        .unwrap();
+
+        let rows = load_merged(&[source(dir.path(), "work")]).unwrap();
+        // actives = a (1), c (3); completed b keeps id 2 in the full index
+        let f = crate::filter::Filter::from_parsed(&crate::args::parse(&[
+            "status:active".to_string(),
+        ])
+        .unwrap());
+        let shown: Vec<usize> = rows.iter().filter(|r| f.matches(&r.task)).map(|r| r.id).collect();
+        assert_eq!(shown, vec![1, 3]);
+    }
 }
