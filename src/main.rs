@@ -9,6 +9,7 @@ mod date_parser;
 mod filter;
 mod id_manager;
 mod model;
+mod source;
 mod storage;
 mod sync;
 

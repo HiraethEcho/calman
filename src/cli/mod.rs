@@ -12,6 +12,7 @@ pub mod tui;
 
 use crate::config::{Config, ContextKind, Source, SourceType};
 use crate::model::Task;
+use crate::source;
 #[cfg(feature = "storage-ics")]
 use crate::storage::ics::IcsStorage;
 #[cfg(feature = "storage-jsonl")]
@@ -42,10 +43,21 @@ pub fn open_storage(src: &Source) -> Result<Store> {
         SourceType::Ics => {
             bail!("this build was compiled without the `storage-ics` feature")
         }
+        SourceType::IcsDir => {
+            bail!(
+                "IcsDir source `{}` must be resolved to a collection before opening storage",
+                src.name
+            )
+        }
     })
 }
 
 /// Resolve the effective source list: `--source` override > context defaults.
+///
+/// Handles `IcsDir` expansion:
+/// - `source:name/collection` → single virtual `Ics` source for that collection
+/// - `source:name` (IcsDir) → expand all discovered collections
+/// - `source:name` (regular) → use directly
 pub fn resolve_sources(
     conf: &Config,
     override_: Option<&[String]>,
@@ -57,10 +69,8 @@ pub fn resolve_sources(
     };
     let mut out = Vec::new();
     for name in names {
-        match conf.source(&name) {
-            Some(s) => out.push(s.clone()),
-            None => bail!("unknown source `{name}`"),
-        }
+        let resolved = source::resolve_source_name(&conf.sources, &name)?;
+        out.extend(resolved);
     }
     if out.is_empty() {
         bail!("no sources selected");

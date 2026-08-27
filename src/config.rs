@@ -19,6 +19,10 @@ pub const CONFIG_FILE: &str = "config.toml";
 pub enum SourceType {
     Jsonl,
     Ics,
+    /// Directory of ICS collections (Radicale/vdirsync layout).
+    /// Auto-discovers subdirectories containing `.ics` files.
+    #[serde(rename = "ics-dir")]
+    IcsDir,
 }
 
 /// Optional per-source sync configuration (`pre_hook` → `cmd` → `post_hook`).
