@@ -390,13 +390,6 @@ pub fn local_midnight(d: NaiveDate) -> DateTime<Utc> {
     local_to_utc(d.and_hms_opt(0, 0, 0).unwrap())
 }
 
-/// `d` at `HH:MM` local time, as UTC (used for `modify start:<date>` defaults).
-pub fn time_on_date(d: NaiveDate, hhmm: &str) -> Result<DateTime<Utc>> {
-    let t = NaiveTime::parse_from_str(hhmm.trim(), "%H:%M")
-        .map_err(|_| anyhow::anyhow!("bad default time `{hhmm}` (expected HH:MM)"))?;
-    Ok(local_to_utc(d.and_time(t)))
-}
-
 /// Compute `dtend` from user input. All-day `end` is inclusive: stored DTEND = day after.
 pub fn resolve_end(start: DateTime<Utc>, allday: bool, end: DateValue) -> Result<DateTime<Utc>> {
     let start_local = start.with_timezone(&Local);

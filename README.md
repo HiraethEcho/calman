@@ -29,14 +29,15 @@ calman help                                     # full cheat-sheet
 calman ships two config tiers; copy what you need into `~/.config/calman/`.
 
 - **`*.default.toml`** — minimal, working baseline (no comments):
-  `config.default.toml`, `report.default.toml`, `theme.default.toml`.
+  `config.default.toml` (self-contained: every default incl. `[report.*]`,
+  `[colorscheme]`, `[icons]` — no separate `report.default.toml`).
 - **`*.example.toml`** — heavily annotated custom samples:
-  `config.example.toml`, `report.example.toml`, `theme.example.toml`.
+  `config.example.toml`, `report.example.toml`, `colorscheme.example.toml`.
 
 A typical `config.toml` includes the defaults and overrides a few keys:
 
 ```toml
-include = ["report.default.toml", "theme.default.toml"]
+include = ["config.default.toml", "colorscheme.example.toml"]
 
 [defaults]
 write_source = "work"

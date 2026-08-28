@@ -2,19 +2,20 @@
 # calman — 主配置示例 (main configuration example)
 #
 # 使用: 将本文件复制到 ~/.config/calman/config.toml (或 $XDG_CONFIG_HOME/
-#       calman/config.toml), 连同 report.example.toml / theme.example.toml
+#       calman/config.toml), 连同 report.example.toml / colorscheme.example.toml
 #       一起复制, 按需修改后保存。
 #
 # 模块化配置 (include):
-#   - report.example.toml → [report.*] 报告 / [[color]] 颜色规则 / [icons] 图标
-#   - theme.example.toml  → [ui] 界面行为   / [theme] TUI 调色板
+#   - report.example.toml → [report.*] 报告 / [icons] 图标
+#   - colorscheme.example.toml → [tui] 界面行为 / [colorscheme] 行级颜色
 #   - 路径相对本文件所在目录; 也支持绝对路径或 ~/ 开头 (如 "~/calman/report.toml")
 #   - 合并规则: include 文件先加载, 本文件的值优先 (主文件胜出)
 #   - include 只支持一层, 被包含文件里不能再写 include
 # ============================================================================
 
 # 引用的模块文件 (可改名, 改名后同步修改此项)
-include = ["report.example.toml", "theme.example.toml"]
+include = ["report.example.toml", "colorscheme.example.toml"]
+
 
 # ---------------------------------------------------------------- [defaults]
 # 全局默认值
@@ -34,13 +35,9 @@ tui  = ["work", "personal"]          # TUI 启动时显示; 空 = 全部
 [date]
 workweek_end = "17:00"               # eoww (工作周结束) 的截止时刻
 week_start = "monday"                # 一周第一天: monday | sunday
-default_start_time = "09:00"         # modify 加 start: 但只给日期时用的时刻
 default_event_duration = "1h"        # event 无 end:/duration: 时的默认时长
 # 仅含日期的 due (全天 todo): true=到期当天即算逾期, false=过期后次日才算 (默认)
 due_date_overdue_today = true
-
-# ---------------------------------------------------------------------- [ui]
-# 界面行为见 theme.example.toml; 也可在此处覆盖 (主文件优先)
 
 # ------------------------------------------------------------------ [locale]
 [locale]
@@ -69,4 +66,4 @@ location = "~/.contacts/radicale"
 # 引用: source:work/collection 或 source:personal/"My Calendars"
 
 # 报告 / 图标 → report.example.toml
-# 行级颜色规则 → theme.example.toml ([theme] / [theme.color], custom.theme 格式)
+# 行级颜色规则 → colorscheme.example.toml ([colorscheme] / [colorscheme.rules.*])

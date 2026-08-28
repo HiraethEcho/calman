@@ -5,7 +5,6 @@
 # 内容:
 #   [report.<name>]  报告定义 (同名覆盖内置 ls/list/next)
 #   [icons]          nerdfont 图标全局覆盖
-#   [[color]]        全局行级颜色规则
 #
 # 内置报告已存在: ls (短列) / list (长列) / next (默认)。这里展示同名覆盖写法,
 # 删除不需要的块即用内置。
@@ -83,4 +82,4 @@ cancelled = "✕"
 
 # 自定义 field = "type" 列仍可用列级 icons { todo=..., event=... }
 
-# 行级颜色规则在 theme.example.toml 的 [theme] / [theme.color] 中定义:
+# 行级颜色规则在 colorscheme.example.toml 的 [colorscheme] / [colorscheme.rules.*] 中定义:

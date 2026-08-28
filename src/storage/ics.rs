@@ -15,11 +15,12 @@ use std::path::{Path, PathBuf};
 /// Storage rooted at a source location holding one `.ics` file per task.
 pub struct IcsStorage {
     dir: PathBuf,
+    tz: Tz,
     tasks: Vec<Task>,
 }
 
 impl IcsStorage {
-    pub fn open(location: &Path) -> Result<Self> {
+    pub fn open(location: &Path, tz: Tz) -> Result<Self> {
         fs::create_dir_all(location)
             .with_context(|| format!("create storage dir {}", location.display()))?;
         let mut tasks = Vec::new();
@@ -39,6 +40,7 @@ impl IcsStorage {
         }
         Ok(IcsStorage {
             dir: location.to_path_buf(),
+            tz,
             tasks,
         })
     }
@@ -54,7 +56,7 @@ impl Storage for IcsStorage {
     }
 
     fn add(&mut self, task: Task) -> Result<()> {
-        atomic_write(&self.file_for(&task.uid), render_ics(&task)?.as_bytes())?;
+        atomic_write(&self.file_for(&task.uid), render_ics(&task, self.tz)?.as_bytes())?;
         self.tasks.push(task);
         Ok(())
     }
@@ -70,7 +72,7 @@ impl Storage for IcsStorage {
         f(t)?;
         t.updated_at = Utc::now();
         let t = &self.tasks[pos];
-        atomic_write(&self.file_for(uid), render_ics(t)?.as_bytes())?;
+        atomic_write(&self.file_for(uid), render_ics(t, self.tz)?.as_bytes())?;
         Ok(Some(t.clone()))
     }
 
@@ -107,7 +109,7 @@ fn fold(line: &str) -> String {
 }
 
 /// Render a task as a full VCALENDAR document.
-pub fn render_ics(task: &Task) -> Result<String> {
+pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
     let mut lines = String::new();
     lines.push_str("BEGIN:VCALENDAR\r\n");
     lines.push_str("VERSION:2.0\r\n");
@@ -157,7 +159,7 @@ pub fn render_ics(task: &Task) -> Result<String> {
                 d.with_timezone(&Local).format("%Y%m%d")
             ));
         } else {
-            props.push(format!("DUE:{}", dt(d)));
+            props.push(format!("DUE;TZID={}:{}", tz.name(), dt_local(d, tz)));
         }
     }
     if let Some(p) = task.percent_complete {
@@ -173,7 +175,7 @@ pub fn render_ics(task: &Task) -> Result<String> {
                 d.with_timezone(&Local).format("%Y%m%d")
             ));
         } else {
-            props.push(format!("DTSTART:{}", dt(d)));
+            props.push(format!("DTSTART;TZID={}:{}", tz.name(), dt_local(d, tz)));
         }
     }
     if let Some(d) = task.dtend {
@@ -183,7 +185,7 @@ pub fn render_ics(task: &Task) -> Result<String> {
                 d.with_timezone(&Local).format("%Y%m%d")
             ));
         } else {
-            props.push(format!("DTEND:{}", dt(d)));
+            props.push(format!("DTEND;TZID={}:{}", tz.name(), dt_local(d, tz)));
         }
     }
     if let Some(r) = &task.rrule {
@@ -329,6 +331,11 @@ fn dt(d: DateTime<Utc>) -> String {
         .trim_end_matches('Z')
         .to_string()
         + "Z"
+}
+
+/// Format a UTC instant as the local wall-clock time in `tz` (no `Z`).
+fn dt_local(d: DateTime<Utc>, tz: Tz) -> String {
+    d.with_timezone(&tz).format("%Y%m%dT%H%M%S").to_string()
 }
 
 fn parse_dt(s: &str) -> Option<DateTime<Utc>> {
@@ -482,7 +489,7 @@ mod tests {
     #[test]
     fn ics_roundtrip() {
         let t = make_task();
-        let rendered = render_ics(&t).unwrap();
+        let rendered = render_ics(&t, Tz::UTC).unwrap();
         let mut parsed = parse_ics(&rendered).unwrap();
         parsed.source = "work".into();
         assert_eq!(parsed.uid, t.uid);
@@ -497,11 +504,11 @@ mod tests {
         let t = make_task();
         std::fs::write(
             dir.path().join(format!("{}.ics", t.uid)),
-            render_ics(&t).unwrap(),
+            render_ics(&t, Tz::UTC).unwrap(),
         )
         .unwrap();
         let _ = std::io::stdout().flush();
-        let s = IcsStorage::open(dir.path()).unwrap();
+        let s = IcsStorage::open(dir.path(), Tz::UTC).unwrap();
         assert_eq!(s.list().len(), 1);
         assert_eq!(s.list()[0].summary, "ship it");
     }
@@ -517,7 +524,7 @@ mod tests {
             chrono::NaiveDate::from_ymd_opt(2026, 8, 14).unwrap(),
         ));
         t.alarm_before = Some(900);
-        let rendered = render_ics(&t).unwrap();
+        let rendered = render_ics(&t, Tz::UTC).unwrap();
         assert!(rendered.contains("DTSTART;VALUE=DATE:20260812"));
         assert!(rendered.contains("DTEND;VALUE=DATE:20260814"));
         assert!(rendered.contains("TRIGGER:-PT900S"));

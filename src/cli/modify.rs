@@ -1,14 +1,14 @@
 //! `modify` subcommand handler.
 //!
 //! Rules: bare words replace summary. `+allday` converts to all-day (clears
-//! times). `start:` auto-converts to a timed (non-allday) event; date-only
-//! `start:` uses `[date] default_start_time`.
+//! times). `start:` sets the event start: a date-only `start:` makes the event
+//! all-day, a date-time `start:` makes it timed. `end:`/`duration:` optional.
 
 use crate::args::ParsedArgs;
 use crate::cli::open_storage;
 use crate::config::Config;
 use crate::date_parser::{
-    DateValue, local_midnight, parse_date_value, parse_duration, resolve_end, time_on_date,
+    DateValue, local_midnight, parse_date_value, parse_duration, resolve_end,
 };
 use crate::model::{Task, TaskStatus};
 use crate::storage::Storage;
@@ -40,13 +40,14 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         bail!("no changes specified");
     }
 
-    let start = if let Some(s) = &q.start {
+    let (start, start_allday) = if let Some(s) = &q.start {
         match parse_date_value(s)? {
-            DateValue::Date(d) => Some(time_on_date(d, &conf.date.default_start_time)?),
-            DateValue::Time(dt) => Some(dt),
+            // Date-only `start:` → all-day event at local midnight.
+            DateValue::Date(d) => (Some(local_midnight(d)), true),
+            DateValue::Time(dt) => (Some(dt), false),
         }
     } else {
-        None
+        (None, false)
     };
     let end = q.end.as_deref().map(parse_date_value).transpose()?;
     let dur = q.duration.as_deref().map(parse_duration).transpose()?;
@@ -81,7 +82,7 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         let src = conf
             .source(&source)
             .ok_or_else(|| anyhow::anyhow!("unknown source `{source}`"))?;
-        let mut st = open_storage(src)?;
+        let mut st = open_storage(conf, src)?;
         st.update(&uid, |t| {
             apply(
                 t,
@@ -98,6 +99,7 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
                     description: q.description.clone(),
                     allday: q.allday,
                     start,
+                    start_allday,
                     end,
                     duration: dur,
                     alert,
@@ -125,6 +127,7 @@ struct Upd {
     description: Option<String>,
     allday: bool,
     start: Option<DateTime<Utc>>,
+    start_allday: bool,
     end: Option<DateValue>,
     duration: Option<Duration>,
     alert: Option<i64>,
@@ -185,9 +188,12 @@ fn apply(t: &mut Task, u: &Upd) -> Result<()> {
     }
 
     if let Some(s) = u.start {
-        // Any explicit `start:` makes the event timed.
-        t.allday = false;
+        // Date-only `start:` keeps the event all-day; date-time makes it timed.
+        t.allday = u.start_allday;
         t.dtstart = Some(s);
+        if u.start_allday {
+            t.dtend = None; // drop any stale timed end; all-day end is implicit
+        }
     }
 
     if let Some(s) = t.dtstart {

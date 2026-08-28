@@ -38,19 +38,19 @@ calman ships two tiers of config so you can start small and grow:
 
 | Tier | Files | Purpose |
 | :--- | :---- | :------ |
-| **default** (complete reference) | `config.default.toml`, `report.default.toml`, `theme.default.toml` | `config.default.toml` is a **self-contained** file listing *every* default option — exactly what calman uses when no config file exists. `report.default.toml` / `theme.default.toml` are the matching default report/theme tables. |
-| **example** (annotated) | `config.example.toml`, `report.example.toml`, `theme.example.toml` | Heavily commented custom samples to study and copy from. |
+| **default** (complete reference) | `config.default.toml` | A **self-contained** file listing *every* default option — exactly what calman uses when no config file exists. It defines the default `work` source, `[defaults]`, `[contexts]`, `[date]`, `[tui]`, `[locale]`, `[icons]`, the default `[colorscheme]` row colors, and the `[report.*]` tables inline. |
+| **example** (annotated) | `config.example.toml`, `report.example.toml`, `colorscheme.example.toml` | Heavily commented custom samples to study and copy from. |
 
 `config.default.toml` mirrors `Config::default()` — copy it as your `config.toml`
 to start from fully-known defaults and override only the keys you need. It is
 **self-contained** (no `include`): it defines the default `work` source, the
-`[defaults]`, `[contexts]`, `[date]`, `[ui]`, `[locale]`, `[icons]` sections and
-documents `[theme]`, `[report.*]` and the reserved `[date]` keys inline.
+`[defaults]`, `[contexts]`, `[date]`, `[tui]`, `[locale]`, `[icons]` sections and
+documents `[colorscheme]`, `[report.*]` and the reserved `[date]` keys inline.
 
 A typical custom `config.toml` builds on the defaults via `include`:
 
 ```toml
-include = ["config.default.toml", "report.default.toml", "theme.default.toml"]
+include = ["config.default.toml", "colorscheme.example.toml"]
 
 [defaults]
 write_source = "work"
@@ -90,7 +90,7 @@ cp config.default.toml ~/.config/calman/config.toml
 
 # 2. (optional) study the annotated examples for ideas
 # cp config.example.toml ~/.config/calman/config.toml
-# cp report.example.toml theme.example.toml ~/.config/calman/
+# cp report.example.toml colorscheme.example.toml ~/.config/calman/
 
 # 3. try it
 calman add "buy milk" due:tomorrow pri:H +home

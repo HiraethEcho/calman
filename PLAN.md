@@ -66,10 +66,27 @@
 - [x] Builtin virtual tags: `OVERDUE`, `DONE`≡`COMPLETED`, `CANCELLED`, `IN-PROCESS`, `TAGGED`/`UNTAGGED`, `TODO`/`EVENT`, `SCHEDULED`.
 - [x] `rel:<parent-id>` attribute on `add`/`modify` → `RELATED-TO` (`RELTYPE=PARENT`).
 - [x] `RELATED-TO` read/write in `IcsStorage`; `related_to` persisted in JSONL.
-- [x] Modular config: `include` merge in `config.rs` + `config.example.toml` / `report.example.toml` / `theme.example.toml`.
+- [x] Modular config: `include` merge in `config.rs` + `config.example.toml` / `report.example.toml` / `colorscheme.example.toml`.
 - [x] Config two tiers: `*.default.toml` (minimal baseline) + `*.example.toml` (annotated samples).
 - [x] Recurrence: `recur:`/`repeat:` → standard RFC 5545 `RRULE` (`recurrence.rs`); raw `FREQ=` passthrough + friendly grammar.
 - [x] Date-only `due`/`start` → all-day (`VALUE=DATE`); `[date] due_date_overdue_today` toggle.
+
+### 2.5 fix.md Cleanup (config ergonomics)
+- [x] Drop `[date] default_start_time`: remove field (config.rs `DateConfig` + default fn + `Config::default`), remove from `config.default.toml`. `modify start:<date>` (date-only) now becomes an all-day event, consistent with `add` (update `modify.rs` + header doc).
+- [x] Move `default_filter` from `[ui]` into `[tui]`; delete the now-empty `[ui]` section (`config.rs` `UiConfig`→`TuiConfig`, `config.default.toml`).
+- [x] Show default icons in `config.default.toml` `[icons.todo]`/`[icons.event]` (copy builtin: todo ○ ● ✓ ✕; event calendar glyph / ● / ✓ / ✕).
+- [x] Merge `report.default.toml` into `config.default.toml` (add `[report.ls]`/`[report.list]`/`[report.next]`); delete `report.default.toml`. Update all references (SPEC.md, README.md, docs/install.md, colorscheme.example.toml, `src/cli/mod.rs` help, `config.example.toml`).
+- [x] Rewrite `colorscheme.rules` as inline tables (user-preferred format) in `config.default.toml` + `colorscheme.example.toml`:
+  ```toml
+  [colorscheme.rules]
+  completed = {fg="gray10"}
+  overdue = {inverse=true}
+  "priority.H" = {fg="red", bold=true}
+  ```
+  quoted keys for dotted `priority.*`; verify serde parses into `HashMap<String,RuleStyle>`.
+- [x] Reconcile docs (DESIGN.md, feature.md, SPEC.md, README.md, docs/install.md, docs/reports.md) for the above: default_start_time gone, `[ui]`→`[tui]`, report merge, colorscheme inline format, all-day semantics.
+- [x] Tests: keep `-0900`, `dur:`/`end:`, all-day event, `default_event_duration` green; add modify date-only-start→all-day; add colorscheme inline-table parse test.
+- [x] `cargo build` + `cargo clippy --all-targets` clean + `cargo test` green; manual smoke verify.
 
 ---
 

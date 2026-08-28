@@ -15,6 +15,7 @@ Taskwarrior-style CLI and a planned TUI. Data lives locally as `jsonl` or
 - [Filters](filters.md) — the shared filter grammar used by the CLI and reports
 - [Reports](reports.md) — built-in reports, `rc` overrides, icons, and colors
 - [Recurrence](recurrence.md) — `recur:` / `repeat:` normalised to RFC 5545 `RRULE`
+- [iCalendar format](icalendar.md) — `.ics` file format reference (RFC 5545): structure, date/time forms, `RRULE`, `STATUS`, `VTIMEZONE`
 
 ## Other project docs (repository root)
 

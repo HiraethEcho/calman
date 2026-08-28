@@ -116,7 +116,7 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         task.alarm_before = Some(secs);
     }
 
-    let mut st = open_storage(&src)?;
+    let mut st = open_storage(conf, &src)?;
     st.add(task)?;
     if q.start.is_some() {
         println!("added event to `{single}`");

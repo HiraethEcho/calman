@@ -136,51 +136,52 @@ cancelled = "✕"
 
 ## Colors
 
-Row-level colors use the Taskwarrior `custom.theme` vocabulary under `[theme]`:
+Row-level colors use the `[colorscheme]` table. Live in `colorscheme.example.toml`
+(or inline in `config.toml`):
 
 ```toml
-[theme]
-name = "default"
-"rule.precedence.color" = "deleted,completed,active,overdue,due.today,due,uda.,blocked,blocking,scheduled,tagged"
+[colorscheme]
+priority = ["completed", "overdue", "today", "due", "cancelled",
+            "blocked", "blocking", "scheduled", "tagged",
+            "priority.H", "priority.M", "priority.L"]
 
-[theme.color]
-completed = "gray10 on gray2"
-active = "underline"
-overdue = "inverse"
-"due.today" = "underline"
-due = "bold"
-blocked = "gray18"
-"uda.priority.L" = "gray14"
-"uda.priority.M" = "green"
-"uda.priority.H" = "yellow"
-blocking = "gray23"
-scheduled = "gray22"
-tagged = "gray21 bold"
+[colorscheme.palette]
+blue = "#1e90ff"
+
+[colorscheme.rules]
+completed   = {fg="gray10"}
+overdue     = {inverse=true}
+today       = {fg="yellow", underline=true}
+due         = {fg="yellow", bold=true, italic=true}
+"priority.H" = {fg="red", bold=true}
 ```
 
-- `rule.precedence.color` is a comma-separated list; the **first rule that both
-  is defined and matches** wins.
-- Style syntax: `fg [on bg] [bold|underline|italic|dim|inverse]`.
-- Colors: `black red green yellow blue magenta cyan white`, `bright-*`,
+- `priority` is the rule precedence (first matching rule wins). Omit it to use
+  the built-in order: `completed cancelled overdue today due priority.H priority.M
+  priority.L scheduled tagged blocked blocking`.
+- Each entry under `[colorscheme.rules]` accepts optional `fg` / `bg` (a named
+  color, a `#RRGGBB` hex, or a name from `palette`) and toggles `bold` /
+  `italic` / `underline` / `dim` / `inverse`.
+- Named colors: `black red green yellow blue magenta cyan white`, `bright-*`,
   `gray`/`grey`, and `gray0`–`gray23` (256-scale).
-- Supported rules: `deleted` (never matches — calman hard-deletes),
-  `completed`, `active`, `overdue`, `due.today`, `due`, `blocked`, `blocking`,
-  `scheduled`, `tagged`, `uda.priority.L|M|H`.
+- Supported rules: `completed`, `overdue`, `today`, `due`,
+  `cancelled`, `blocked`, `blocking`, `scheduled`, `tagged`,
+  `priority.L|M|H`.
 
-**What each rule matches** (first defined rule that matches wins):
+**What each rule matches** (first matching rule in `priority` order wins):
 
 | Rule | Matches |
 | :--- | :------ |
 | `completed` | status `completed` |
-| `active` | status `pending` **or** `in-progress` (same as `+ACTIVE`) |
-| `overdue` | a past `due`/`dtstart` and not done (covers both todos **and** events) |
-| `due.today` | `due` falls on the local calendar day |
+| `overdue` | a `due`/`dtstart` whose day is before today and not done (covers both todos **and** events) |
+| `today` | `due` falls on the local calendar day |
 | `due` | has any `due` |
+| `cancelled` | status `cancelled` (was `deleted` in Taskwarrior) |
 | `scheduled` | is an event (has `dtstart`) |
 | `blocked` | a parent todo referenced by another item's `related_to` |
 | `blocking` | a todo that has a `related_to` |
 | `tagged` | has ≥1 tag |
-| `uda.priority.L|M|H` | priority 1 / 5 / 9 |
+| `priority.L|M|H` | priority 1 / 5 / 9 |
 
 ## Sync (referenced by reports/CLI)
 

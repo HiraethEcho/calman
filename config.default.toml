@@ -29,21 +29,23 @@ tui = []
 workweek_end = "17:00"
 # First day of the week (used by `sow`/`eow`). Reserved; not yet applied.
 week_start = "monday"
-# Time used when a date-only `start:` needs an hour (e.g. "09:00").
-default_start_time = "09:00"
-# Default event length when neither `end:` nor `duration:` is given.
+# Default event length when neither `end:` nor `duration:` is given (e.g. "1h").
+# A date-only `start:` is always a full-day (all-day) event and ignores this.
 default_event_duration = "1h"
 # For a date-only `due` (all-day todo): count as overdue starting on its own
 # day (`true`) or only after the day passes (`false`, default).
 due_date_overdue_today = false
+# IANA timezone used when serialising timed `DTSTART`/`DTEND`/`DUE` to ICS with a
+# `TZID` (iOS-style local wall time). Omitted → auto-detected from `$TZ` /
+# `/etc/localtime`, else `UTC`.
+# timezone = "Asia/Shanghai"
 
-# -------------------------------------------------------------------------- [ui]
-[ui]
-# Theme name (Phase-3 TUI). Empty = no theme.
-theme = ""
-# Vim-style keybindings (Phase-3 TUI).
+# ------------------------------------------------------------------------- [tui]
+# Phase-3 TUI settings (reserved; not yet wired).
+[tui]
+# Vim-style keybindings (j/k/gg/G) when true, arrow keys when false.
 vim_keys = false
-# TUI default filter: "todo" | "event" | "all" (Phase-3 TUI).
+# TUI default view filter: "todo" | "event" | "all".
 default_filter = ""
 
 # ---------------------------------------------------------------------- [locale]
@@ -52,24 +54,82 @@ default_filter = ""
 language = "en"
 
 # ---------------------------------------------------------------------- [icons]
-# Per-kind nerdfont overrides. Empty → builtin defaults
-# (todo: ○ ● ✓ ✕ ; event: calendar glyph, cancelled ✕).
+# Per-kind nerdfont overrides. Omit to use builtin defaults:
+#   todo:   pending=○  in-progress=●  completed=✓  cancelled=✕
+#   event:  pending=󰃭 (calendar)  in-progress=●  completed=✓  cancelled=✕
 [icons]
 [icons.todo]
+pending = "○"
+in-progress = "●"
+completed = "✓"
+cancelled = "✕"
 [icons.event]
+pending = "󰃭"
+in-progress = "●"
+completed = "✓"
+cancelled = "✕"
 
-# ---------------------------------------------------------------------- [theme]
-# Row-level colors (taskwarrior custom.theme format). Optional; omit for none.
-# [theme]
-# name = "dark"
-# "rule.precedence.color" = "completed,active,overdue,due.today,due,uda.,blocked,blocking,scheduled,tagged"
-# [theme.color]
-# completed = "gray10 on gray2"
-# overdue = "inverse"
+# ----------------------------------------------------------------- [colorscheme]
+# Report row colors (Phase-3 TUI / `list --color`). Optional; omit for none.
+# `priority` = rule precedence (first match wins). Built-in named colors:
+#   black red green yellow blue magenta cyan white
+#   gray0..gray23 (or grey)  bright-* variants
+# Hex (#RRGGBB) and names from `palette` are also accepted for fg/bg.
+[colorscheme]
+priority = ["completed", "cancelled", "overdue", "today", "due",
+            "priority.H", "priority.M", "priority.L",
+            "scheduled", "tagged",
+            "blocked", "blocking"]
+# [colorscheme.palette]
+# blue = "#1e90ff"
+[colorscheme.rules]
+completed = {fg="gray10"}
+overdue = {inverse=true}
+today = {fg="yellow", bold=true}
+due = {fg="yellow"}
+cancelled = {fg="gray10"}
+blocked = {fg="gray10"}
+blocking = {fg="gray10"}
+scheduled = {fg="gray10"}
+tagged = {fg="gray10"}
+"priority.H" = {fg="red", bold=true}
+"priority.M" = {fg="yellow"}
+"priority.L" = {fg="blue"}
 
 # ------------------------------------------------------------------- [report.*]
-# Built-in reports (ls/list/next) are hardcoded; override here if desired.
-# (See report.example.toml for the full schema.)
+# Built-in reports (ls/list/next). Override here to change columns/filter/sort.
+[report.ls]
+filter = "type:todo status:active or type:event due.after:sod"
+sort = ["due+", "created+"]
+columns = [
+  { field = "id", label = "ID", width = 4 },
+  { field = "status", label = "ST", icon = true },
+  { field = "date", label = "DATE", todo_format = "relative" },
+  { field = "summary", label = "SUMMARY" },
+]
+
+[report.list]
+filter = "type:todo -status:completed -status:cancelled or type:event due.after:sod"
+sort = ["status-", "pri-", "due+"]
+columns = [
+  { field = "id", label = "ID", width = 4 },
+  { field = "status", label = "STATUS", icon = true },
+  { field = "pri", label = "PRI" },
+  { field = "date", label = "DATE", todo_format = "relative" },
+  { field = "tags", label = "TAGS" },
+  { field = "summary", label = "SUMMARY" },
+  { field = "desc", label = "DESC" },
+]
+
+[report.next]
+filter = "type:todo status:active or type:event due.after:sod"
+sort = ["due+", "pri-"]
+columns = [
+  { field = "id", label = "ID", width = 4 },
+  { field = "status", label = "ST", icon = true },
+  { field = "date", label = "DATE", todo_format = "relative" },
+  { field = "summary", label = "SUMMARY" },
+]
 
 # ---------------------------------------------------------------------- [source]
 # Default data source created when none is configured.

@@ -118,8 +118,8 @@ calman 3 modify start:tomorrow allday    # convert to an all-day event
 Notes:
 - `+allday` converts the target to all-day (drops times and `DTEND`); any
   `start:` makes it a timed event again. There is no `-allday`.
-- A date-only `start:` on `modify` uses `[date].default_start_time` (default
-  `09:00`) for the hour.
+- A date-only `start:` on `modify` makes the event all-day (local midnight, no
+  implicit hour) — the same as `add`.
 
 ---
 

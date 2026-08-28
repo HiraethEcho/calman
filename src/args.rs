@@ -70,11 +70,43 @@ pub struct ParsedArgs {
 
 impl ParsedArgs {}
 
+/// Free-text attribute whose value may arrive on following tokens
+/// (e.g. `desc: "some more information"`).
+#[derive(Clone, Copy)]
+enum Capture {
+    Description,
+    Location,
+}
+
+/// True if `t` begins a recognised attribute token — used to end capture mode.
+fn is_attr_token(t: &str) -> bool {
+    let l = t.to_ascii_lowercase();
+    l.starts_with("rc.")
+        || l.starts_with("source:")
+        || l.starts_with("due:")
+        || l.starts_with("start:")
+        || l.starts_with("end:")
+        || l.starts_with("repeat:")
+        || l.starts_with("recur:")
+        || l.starts_with("duration:")
+        || l.starts_with("dur:")
+        || l.starts_with("alert:")
+        || l.starts_with("desc:")
+        || l.starts_with("location:")
+        || l.starts_with("rel:")
+        || l.starts_with("status:")
+        || l.starts_with("priority:")
+        || l.starts_with("pri:")
+        || (t.starts_with('+') && t.len() > 1)
+        || (t.starts_with('-') && t.len() > 1)
+}
+
 /// Parse raw argv (after the binary/global flags) into structured args.
 pub fn parse(args: &[String]) -> Result<ParsedArgs> {
     let mut q = ParsedArgs::default();
     let mut ids_exhausted = false;
     let mut literal = false; // after `--`, everything is text
+    let mut capture: Option<Capture> = None; // free-text attr value collection
 
     for tok in args {
         if literal {
@@ -82,6 +114,33 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
             continue;
         }
         let lower = tok.to_ascii_lowercase();
+
+        // Capture mode: a free-text attribute (`desc:`, `location:`) whose
+        // value follows the colon on later tokens (e.g. `desc: "some info"`).
+        // Collect words until the next recognised attribute token or `--`.
+        if let Some(target) = &mut capture {
+            let stop = tok == "--" || is_attr_token(&lower);
+            if stop {
+                capture = None;
+            } else {
+                let slot = match target {
+                    Capture::Description => &mut q.description,
+                    Capture::Location => &mut q.location,
+                };
+                match slot {
+                    Some(s) => {
+                        if s.is_empty() {
+                            *s = tok.to_string();
+                        } else {
+                            s.push(' ');
+                            s.push_str(tok);
+                        }
+                    }
+                    None => *slot = Some(tok.to_string()),
+                }
+                continue;
+            }
+        }
 
         if tok == "--" {
             literal = true;
@@ -146,7 +205,12 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
         } else if let Some(rest) = lower.strip_prefix("end:") {
             q.end = Some(rest.to_string());
         } else if let Some(rest) = lower.strip_prefix("location:") {
-            q.location = Some(rest.to_string());
+            if rest.is_empty() {
+                q.location = Some(String::new());
+                capture = Some(Capture::Location);
+            } else {
+                q.location = Some(rest.to_string());
+            }
         } else if let Some(rest) = lower
             .strip_prefix("repeat:")
             .or_else(|| lower.strip_prefix("recur:"))
@@ -159,7 +223,12 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
         } else if let Some(rest) = lower.strip_prefix("alert:") {
             q.alert = Some(rest.to_string());
         } else if let Some(rest) = lower.strip_prefix("desc:") {
-            q.description = Some(rest.to_string());
+            if rest.is_empty() {
+                q.description = Some(String::new());
+                capture = Some(Capture::Description);
+            } else {
+                q.description = Some(rest.to_string());
+            }
         } else if lower == "allday" || lower == "+allday" {
             q.allday = true;
         } else if tok.starts_with('+') && tok.len() > 1 {

@@ -7,7 +7,7 @@ use crate::config::{ColumnCfg, Config};
 use crate::filter::{Expr, parse_expr_str};
 use crate::model::TaskStatus;
 use anyhow::{Result, bail};
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Local};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
@@ -583,34 +583,49 @@ fn pad(s: &str, w: usize) -> String {
     format!("{s}{}", " ".repeat(w - n))
 }
 
-/// First matching theme color rule (per `rule.precedence.color`) wraps the
-/// whole row in ANSI codes.
+/// First matching `[colorscheme]` rule (in `priority` order) wraps the row.
+/// Rules evaluated in precedence order; first hit wins.
 fn colorize(conf: &Config, parents: &HashSet<&str>, r: &Row, line: &str) -> String {
-    let Some(theme) = conf.theme.as_ref() else {
+    let Some(cs) = conf.colorscheme.as_ref() else {
         return line.to_string();
     };
-    let Some(prec) = theme.precedence.as_deref() else {
-        return line.to_string();
+    let order: Vec<&str> = if cs.priority.is_empty() {
+        DEFAULT_PRIORITY.to_vec()
+    } else {
+        cs.priority.iter().map(String::as_str).collect()
     };
-    for token in prec.split(',') {
-        let token = token.trim();
-        if token.is_empty() {
-            continue;
-        }
-        for (key, spec) in &theme.colors {
-            if (key == token || (token == "uda." && key.starts_with("uda.")))
-                && rule_matches(key, parents, r)
-            {
-                return wrap_style(&parse_style(spec), line);
-            }
+    for rule in order {
+        if let Some(spec) = cs.rules.get(rule)
+            && rule_matches(rule, parents, r)
+        {
+            return wrap_style(&rule_style_to_style(spec, &cs.palette), line);
         }
     }
     line.to_string()
 }
 
+/// Default rule precedence when `[colorscheme].priority` is empty.
+const DEFAULT_PRIORITY: &[&str] = &[
+    "completed", "cancelled", "overdue", "today", "due",
+    "priority.H", "priority.M", "priority.L",
+    "scheduled", "tagged", "blocked", "blocking",
+];
+
+fn rule_style_to_style(rs: &crate::config::RuleStyle, palette: &HashMap<String, String>) -> Style {
+    Style {
+        bold: rs.bold,
+        dim: rs.dim,
+        italic: rs.italic,
+        underline: rs.underline,
+        inverse: rs.inverse,
+        fg: rs.fg.as_deref().and_then(|c| color_code(c, palette)),
+        bg: rs.bg.as_deref().and_then(|c| color_code(c, palette)),
+    }
+}
+
 /// Taskwarrior-style rule semantics.
 ///
-/// Note: per the reference `custom.theme`, `blocked` = parent todo (uid is
+/// Note: per the `[colorscheme]` rules, `blocked` = parent todo (uid is
 /// referenced by another task's `related_to`), `blocking` = sub todo (has a
 /// parent via `related_to`).
 fn rule_matches(key: &str, parents: &HashSet<&str>, r: &Row) -> bool {
@@ -618,26 +633,19 @@ fn rule_matches(key: &str, parents: &HashSet<&str>, r: &Row) -> bool {
     match key {
         "deleted" => false, // calman hard-deletes; no deleted state
         "completed" => t.status == TaskStatus::Completed,
-        "active" => t.status.is_active(),
-        "overdue" => crate::filter::task_date(t).is_some_and(|d| d < Utc::now()) && !t.status.is_done(),
-        "due.today" => t
-            .due
-            .is_some_and(|d| d.with_timezone(&Local).date_naive() == Local::now().date_naive()),
+        "overdue" => crate::filter::task_date(t).is_some_and(|d| {
+            d.with_timezone(&Local).date_naive() < Local::now().date_naive()
+        }) && !t.status.is_done(),
+        "today" => t.due.is_some_and(|d| d.with_timezone(&Local).date_naive() == Local::now().date_naive()),
         "due" => t.due.is_some(),
+        "cancelled" => t.status == TaskStatus::Cancelled,
         "blocked" => parents.contains(t.uid.as_str()),
         "blocking" => t.related_to.is_some(),
         "scheduled" => t.is_event(),
         "tagged" => !t.tags.is_empty(),
-        k if k.starts_with("uda.priority.") => {
-            let lvl = k.rsplit('.').next().unwrap_or("");
-            t.priority
-                == Some(match lvl {
-                    "H" => 9,
-                    "M" => 5,
-                    "L" => 1,
-                    _ => return false,
-                })
-        }
+        "priority.L" => t.priority == Some(1),
+        "priority.M" => t.priority == Some(5),
+        "priority.H" => t.priority == Some(9),
         _ => false,
     }
 }
@@ -658,39 +666,25 @@ struct Style {
 enum Code {
     Named(u8),
     Gray(u8),
+    Hex(u8, u8, u8),
 }
 
-fn parse_style(s: &str) -> Style {
-    let mut st = Style::default();
-    let mut fg_side = true;
-    for tok in s.split_whitespace() {
-        if tok.eq_ignore_ascii_case("on") {
-            fg_side = false;
-            continue;
+
+fn color_code(name: &str, palette: &HashMap<String, String>) -> Option<Code> {
+    let n = name.trim().to_ascii_lowercase();
+    if let Some(hex) = n.strip_prefix('#') {
+        if hex.len() == 6 {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            return Some(Code::Hex(r, g, b));
         }
-        match tok.to_ascii_lowercase().as_str() {
-            "bold" => st.bold = true,
-            "dim" => st.dim = true,
-            "italic" => st.italic = true,
-            "underline" => st.underline = true,
-            "inverse" => st.inverse = true,
-            _ => {
-                if let Some(c) = color_code(tok) {
-                    if fg_side {
-                        st.fg = Some(c);
-                    } else {
-                        st.bg = Some(c);
-                    }
-                }
-            }
-        }
+        return None;
     }
-    st
-}
-
-fn color_code(name: &str) -> Option<Code> {
-    let n = name.to_ascii_lowercase();
-    if let Some(g) = n.strip_prefix("gray") {
+    if let Some(v) = palette.get(&n) {
+        return color_code(v, palette);
+    }
+    if let Some(g) = n.strip_prefix("gray").or_else(|| n.strip_prefix("grey")) {
         let v: u8 = g.parse().ok()?;
         return (v <= 23).then_some(Code::Gray(v));
     }
@@ -732,16 +726,18 @@ fn wrap_style(st: &Style, text: &str) -> String {
     if st.inverse {
         codes.push("7".into());
     }
-    if let Some(Code::Named(n)) = st.fg {
+    if let Some(Code::Hex(r, g, b)) = st.fg {
+        codes.push(format!("38;2;{r};{g};{b}"));
+    } else if let Some(Code::Named(n)) = st.fg {
         codes.push(n.to_string());
-    }
-    if let Some(Code::Gray(g)) = st.fg {
+    } else if let Some(Code::Gray(g)) = st.fg {
         codes.push(format!("38;5;{}", 232 + g));
     }
-    if let Some(Code::Named(n)) = st.bg {
+    if let Some(Code::Hex(r, g, b)) = st.bg {
+        codes.push(format!("48;2;{r};{g};{b}"));
+    } else if let Some(Code::Named(n)) = st.bg {
         codes.push((n + 10).to_string());
-    }
-    if let Some(Code::Gray(g)) = st.bg {
+    } else if let Some(Code::Gray(g)) = st.bg {
         codes.push(format!("48;5;{}", 232 + g));
     }
     if codes.is_empty() {
@@ -786,26 +782,42 @@ mod tests {
     }
 
     #[test]
-    fn parses_tw_style_strings() {
-        let st = parse_style("gray10 on gray2");
-        assert!(matches!(st.fg, Some(Code::Gray(10))));
-        assert!(matches!(st.bg, Some(Code::Gray(2))));
-        let st2 = parse_style("gray21 bold");
-        assert!(st2.bold);
-        assert!(matches!(st2.fg, Some(Code::Gray(21))));
-        assert!(st2.bg.is_none());
-        assert!(parse_style("inverse").inverse);
+    fn resolves_color_codes_and_hex() {
+        let palette = HashMap::from([("blue".to_string(), "#1e90ff".to_string())]);
+        assert!(matches!(color_code("gray10", &palette), Some(Code::Gray(10))));
+        assert!(matches!(
+            color_code("blue", &palette),
+            Some(Code::Hex(0x1e, 0x90, 0xff))
+        ));
+        assert!(matches!(
+            color_code("#00ff00", &palette),
+            Some(Code::Hex(0, 0xff, 0))
+        ));
+        assert!(matches!(color_code("red", &palette), Some(Code::Named(31))));
     }
 
     #[test]
-    fn theme_colorizes_row_by_precedence() {
+    fn colorscheme_colorizes_row_by_precedence() {
         let conf = Config {
-            theme: Some(crate::config::ThemeCfg {
-                name: Some("t".into()),
-                precedence: Some("completed,overdue".into()),
-                colors: HashMap::from([
-                    ("completed".to_string(), "gray10 on gray2".to_string()),
-                    ("overdue".to_string(), "inverse".to_string()),
+            colorscheme: Some(crate::config::ColorSchemeCfg {
+                priority: vec!["completed".into(), "overdue".into()],
+                palette: HashMap::new(),
+                rules: HashMap::from([
+                    (
+                        "completed".to_string(),
+                        crate::config::RuleStyle {
+                            fg: Some("gray10".into()),
+                            bg: Some("gray2".into()),
+                            ..Default::default()
+                        },
+                    ),
+                    (
+                        "overdue".to_string(),
+                        crate::config::RuleStyle {
+                            inverse: true,
+                            ..Default::default()
+                        },
+                    ),
                 ]),
             }),
             ..Config::default()

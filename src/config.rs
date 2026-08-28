@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use chrono_tz::Tz;
 
 /// Config directory name under the XDG config root.
 pub const CONFIG_DIR: &str = "calman";
@@ -139,9 +140,6 @@ pub struct DateConfig {
     pub workweek_end: String,
     #[serde(default = "default_week_start")]
     pub week_start: String,
-    /// Time used when a `modify start:<date>` needs an hour (e.g. "09:00").
-    #[serde(default = "default_start_time")]
-    pub default_start_time: String,
     /// Fallback event length when neither `end:` nor `duration:` given (e.g. "1h").
     #[serde(default = "default_event_duration")]
     pub default_event_duration: String,
@@ -149,17 +147,10 @@ pub struct DateConfig {
     /// starting on its own day (`true`) or only after the day passes (`false`).
     #[serde(default = "default_due_date_overdue_today")]
     pub due_date_overdue_today: bool,
-}
-
-/// `[ui]` — TUI settings.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct UiConfig {
-    #[serde(default)]
-    pub theme: String,
-    #[serde(default)]
-    pub vim_keys: bool,
-    #[serde(default)]
-    pub default_filter: String,
+    /// IANA timezone used when serialising timed `DTSTART`/`DTEND`/`DUE` to ICS
+    /// with a `TZID` (iOS-style local wall time). Omitted → auto-detected.
+    #[serde(default = "default_timezone")]
+    pub timezone: String,
 }
 
 /// `[locale]` — UI language.
@@ -182,8 +173,6 @@ pub struct Config {
     #[serde(default)]
     pub date: DateConfig,
     #[serde(default)]
-    pub ui: UiConfig,
-    #[serde(default)]
     pub locale: LocaleConfig,
     #[serde(default, rename = "source")]
     pub sources: Vec<Source>,
@@ -191,28 +180,66 @@ pub struct Config {
     pub reports: HashMap<String, ReportCfg>,
     #[serde(default)]
     pub icons: IconsCfg,
-    /// `[theme]` palette (used by the Phase-3 TUI).
+    /// `[colorscheme]` — report row colors (priority order + per-rule styles).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub theme: Option<ThemeCfg>,
+    pub colorscheme: Option<ColorSchemeCfg>,
+    /// `[tui]` — Phase-3 TUI settings (reserved).
+    #[serde(default)]
+    pub tui: TuiConfig,
 }
 
-/// `[theme]` — named palette + taskwarrior-style color rules for reports.
+/// `[tui]` — TUI settings (Phase-3; reserved). `default_filter` is the TUI
+/// default view filter ("todo" | "event" | "all").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TuiConfig {
+    #[serde(default)]
+    pub vim_keys: bool,
+    #[serde(default)]
+    pub default_filter: String,
+}
+
+impl Default for TuiConfig {
+    fn default() -> Self {
+        Self {
+            vim_keys: true,
+            default_filter: String::new(),
+        }
+    }
+}
+
+/// `[colorscheme]` — report row-level coloring.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ThemeCfg {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    /// `rule.precedence.color` — comma-separated rule order, first match wins.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        rename = "rule.precedence.color"
-    )]
-    pub precedence: Option<String>,
-    /// `color.<rule> = "<fg> [on <bg>] [bold|underline|inverse|...]"`.
-    /// Supported rules: deleted completed active overdue due.today due
-    /// blocked blocking scheduled tagged uda.priority.L/M/H.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty", rename = "color")]
-    pub colors: HashMap<String, String>,
+pub struct ColorSchemeCfg {
+    /// Rule precedence (first match wins). Supported rule keys:
+    /// completed cancelled overdue today due blocked blocking
+    /// scheduled tagged priority.L priority.M priority.H.
+    #[serde(default)]
+    pub priority: Vec<String>,
+    /// Named colors → hex (or any CSS-style value), referenced by `fg`/`bg`.
+    #[serde(default)]
+    pub palette: HashMap<String, String>,
+    /// Per-rule style tables, e.g. `[colorscheme.rules] overdue = {inverse = true}`.
+    #[serde(default)]
+    pub rules: HashMap<String, RuleStyle>,
+}
+
+/// A single color rule's style.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuleStyle {
+    #[serde(default)]
+    pub fg: Option<String>,
+    #[serde(default)]
+    pub bg: Option<String>,
+    #[serde(default)]
+    pub bold: bool,
+    #[serde(default)]
+    pub italic: bool,
+    #[serde(default)]
+    pub underline: bool,
+    #[serde(default)]
+    pub dim: bool,
+    #[serde(default)]
+    pub inverse: bool,
 }
 
 fn default_workweek_end() -> String {
@@ -223,10 +250,6 @@ fn default_week_start() -> String {
     "monday".to_string()
 }
 
-fn default_start_time() -> String {
-    "09:00".to_string()
-}
-
 fn default_event_duration() -> String {
     "1h".to_string()
 }
@@ -235,24 +258,34 @@ fn default_due_date_overdue_today() -> bool {
     false
 }
 
+fn default_timezone() -> String {
+    // Best-effort system IANA zone detection; falls back to UTC.
+    if let Ok(v) = std::env::var("TZ") && !v.is_empty() {
+        return v;
+    }
+    if let Ok(link) = std::fs::read_link("/etc/localtime")
+        && let Some(name) = link.to_string_lossy().split("zoneinfo/").nth(1)
+    {
+        return name.to_string();
+    }
+    "UTC".to_string()
+}
+
+impl DateConfig {
+    /// Parse the configured timezone, falling back to UTC if unknown.
+    pub fn tz(&self) -> Tz {
+        self.timezone.parse::<Tz>().unwrap_or(Tz::UTC)
+    }
+}
+
 impl Default for DateConfig {
     fn default() -> Self {
         Self {
             workweek_end: default_workweek_end(),
             week_start: default_week_start(),
-            default_start_time: default_start_time(),
             default_event_duration: default_event_duration(),
             due_date_overdue_today: default_due_date_overdue_today(),
-        }
-    }
-}
-
-impl Default for UiConfig {
-    fn default() -> Self {
-        Self {
-            theme: "default".to_string(),
-            vim_keys: true,
-            default_filter: "all".to_string(),
+            timezone: default_timezone(),
         }
     }
 }
@@ -276,7 +309,6 @@ impl Default for Config {
             // Empty contexts → fall back to all (selected) sources per DESIGN §1.2.
             contexts: Contexts::default(),
             date: DateConfig::default(),
-            ui: UiConfig::default(),
             locale: LocaleConfig::default(),
             sources: vec![Source {
                 name: "work".to_string(),
@@ -286,7 +318,8 @@ impl Default for Config {
             }],
             reports: HashMap::new(),
             icons: IconsCfg::default(),
-            theme: None,
+            colorscheme: None,
+            tui: TuiConfig::default(),
         }
     }
 }
@@ -474,11 +507,11 @@ mod tests {
                 tui: Vec::new(),
             },
             date: DateConfig::default(),
-            ui: UiConfig::default(),
             locale: LocaleConfig::default(),
             reports: HashMap::new(),
             icons: IconsCfg::default(),
-            theme: None,
+            colorscheme: None,
+            tui: TuiConfig::default(),
             sources: vec![
                 Source {
                     name: "work".into(),
@@ -566,7 +599,7 @@ mod tests {
         let main = dir.path().join("config.toml");
         fs::write(
             &main,
-            r#"include = ["report.toml", "theme.toml"]
+            r#"include = ["report.toml", "colorscheme.toml"]
 [defaults]
 write_source = "work"
 "#,
@@ -586,15 +619,12 @@ pending = "○"
         )
         .unwrap();
         fs::write(
-            dir.path().join("theme.toml"),
-            r#"[ui]
-theme = "dark"
-[theme]
-name = "dark"
-"rule.precedence.color" = "completed,overdue"
-[theme.color]
-completed = "gray10 on gray2"
-overdue = "inverse"
+            dir.path().join("colorscheme.toml"),
+            r#"[colorscheme]
+priority = ["completed", "overdue"]
+[colorscheme.rules]
+completed = {fg="gray10", bg="gray2"}
+overdue = {inverse=true}
 "#,
         )
         .unwrap();
@@ -602,12 +632,12 @@ overdue = "inverse"
         let cfg = Config::load_from(&main).unwrap();
         assert!(cfg.reports.contains_key("next"));
         assert_eq!(cfg.icons.todo.get("pending").map(|s| s.as_str()), Some("○"));
-        assert_eq!(cfg.ui.theme, "dark");
-        let theme = cfg.theme.unwrap();
-        assert_eq!(theme.precedence.as_deref(), Some("completed,overdue"));
+        let cs = cfg.colorscheme.unwrap();
+        assert_eq!(cs.priority, vec!["completed", "overdue"]);
         assert_eq!(
-            theme.colors.get("completed").map(|s| s.as_str()),
-            Some("gray10 on gray2")
+            cs.rules.get("completed").and_then(|r| r.fg.as_deref()),
+            Some("gray10")
         );
+        assert_eq!(cs.rules.get("overdue").map(|r| r.inverse), Some(true));
     }
 }

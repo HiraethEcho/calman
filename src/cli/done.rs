@@ -16,7 +16,7 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         let src = conf
             .source(&source)
             .ok_or_else(|| anyhow::anyhow!("unknown source `{source}`"))?;
-        let mut st = open_storage(src)?;
+        let mut st = open_storage(conf, src)?;
         st.update(&uid, |t| {
             t.status = TaskStatus::Completed;
             t.completed_at = Some(chrono::Utc::now());

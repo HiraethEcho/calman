@@ -116,3 +116,43 @@ fn date_only_due_overdue_respects_config() {
     let (out, _) = calman(home, &["+OVERDUE", "count"]);
     assert_eq!(out.trim(), "1");
 }
+
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::new();
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        if c == '\u{1b}' {
+            for ch in it.by_ref() {
+                if ch == 'm' {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+#[test]
+fn modify_date_only_start_becomes_allday() {
+    let dir = tempdir().unwrap();
+    let home = dir.path();
+    // Default config writes to the `work` jsonl source.
+    assert!(calman(home, &["add", "evt", "start:-0900", "dur:1h"]).1);
+    let (out, _) = calman(home, &["list"]);
+    let id = strip_ansi(&out)
+        .lines()
+        .find(|l| l.contains("evt"))
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+    assert!(calman(home, &["modify", &id, "start:20260828"]).1);
+    let jsonl = std::fs::read_to_string(home.join(".local/share/calman/work/tasks.jsonl")).unwrap();
+    let line = jsonl.lines().find(|l| l.contains("\"summary\":\"evt\"")).unwrap();
+    assert!(line.contains("\"allday\":true"), "expected all-day: {line}");
+    assert!(line.contains("\"dtend\":null"), "expected dtend cleared: {line}");
+}
+

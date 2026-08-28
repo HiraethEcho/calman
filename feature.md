@@ -168,19 +168,20 @@ columns = [
 ]
 ```
 
-Colors: global row-level rules use the taskwarrior `custom.theme` format under `[theme]`:
+Colors: global row-level rules use the `[colorscheme]` table:
 
 ```toml
-[theme]
-name = "default"
-"rule.precedence.color" = "completed,active,overdue,due.today,due,blocked,blocking,scheduled,tagged"
+[colorscheme]
+priority = ["completed", "cancelled", "overdue", "today", "due",
+            "blocked", "blocking", "scheduled", "tagged",
+            "priority.H", "priority.M", "priority.L"]
 
-[theme.color]
-completed = "gray10 on gray2"
-overdue = "inverse"
+[colorscheme.rules]
+completed = {fg="gray10"}
+overdue = {inverse=true}
 ```
 
-Style: `fg [on bg] [bold|underline|italic|dim|inverse]`. Rules: `completed active overdue due.today due blocked blocking scheduled tagged uda.priority.L|M|H`. The first defined rule that matches wins.
+Style: `fg [on bg] [bold|underline|italic|dim|inverse]`; rules: `completed cancelled overdue today due priority.L priority.M priority.H scheduled tagged blocked blocking`. First match in `priority` order wins.
 
 Builtin virtual tags (evaluated at runtime, usable in filters):
 

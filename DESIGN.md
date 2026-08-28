@@ -20,10 +20,9 @@ tui = ["work", "personal"]      # Sources shown when `tui` starts
 workweek_end = "17:00"          # Reserved: `eoww` is currently hardcoded to Friday 17:00
 week_start = "monday"           # Reserved: the week currently always starts on Monday
 
-[ui]
-theme = "default"               # default | dark | light
-vim_keys = true                 # true = Vim style (j/k/gg/G), false = arrow keys
+[tui]
 default_filter = "all"          # "todo" | "event" | "all"
+vim_keys = true                 # true = Vim style (j/k/gg/G), false = arrow keys
 
 [locale]
 language = "en"                 # en | zh-CN
@@ -40,11 +39,11 @@ post_hook = "echo 'done'"
 ```
 
 ### 1.2 Field Details
-- **`include`** (list of strings): extra TOML files merged before the main one, for modular configs (`report.toml`, `theme.toml` …).
+- **`include`** (list of strings): extra TOML files merged before the main one, for modular configs (`report.toml`, `colorscheme.toml` …).
   - Paths relative to the main config file's directory; absolute and `~/`-expanded paths allowed.
   - Merge: tables recurse; scalars/lists in the main file win; keys missing from the main file are taken from the include.
   - One level only — included files cannot contain `include`.
-  - Ship‑with examples: `config.example.toml`, `report.example.toml`, `theme.example.toml`.
+  - Ship‑with examples: `config.example.toml`, `report.example.toml`, `colorscheme.example.toml`.
 - **`defaults.write_source`**: Must be a single valid `source.name`.
 - **`contexts`**:
   - If a context is not defined, it falls back to **all `[[source]]` entries** (for `sync`, entries without `sync.cmd` are skipped).
@@ -237,7 +236,7 @@ calman rc.report.next.columns=id,date,summary rc.report.next.labels=ID,DATE,TASK
 - **Example**: `calman 1 modify new content pri:L -bar due:20260824`
 - **Bare words replace the summary** (Taskwarrior semantics). `+<tag>` adds, `-<tag>` removes.
 - **Attributes**: `summary` via bare text; `desc:`, `due:`, `priority:`/`pri:`, `status:`, `start:`, `end:`, `location:`, `repeat:`, `duration:`, `alert:`.
-- `+allday` → convert to all‑day, drops times/DTEND. Any `start:` → converts to timed (non‑allday); date‑only `start:` uses `[date] default_start_time`. No `-allday`.
+- `+allday` → convert to all‑day, drops times/DTEND. Any `start:` → converts to timed (non‑allday); a date‑only `start:` makes the event all‑day (no implicit hour). No `-allday`.
 
 #### F. `count` — Count tasks
 - **Syntax**: `calman count [FILTERS...]`
@@ -267,8 +266,8 @@ calman rc.report.next.columns=id,date,summary rc.report.next.labels=ID,DATE,TASK
 #### A. List Mode (default)
 - **Focus**: Left panel.
 - **Navigation**:
-    - Vim mode (`vim_keys=true`): `j/k` up/down, `gg` top, `G` bottom.
-    - Arrow mode (`vim_keys=false`): `↑/↓` up/down, `Home` top, `End` bottom.
+    - Vim mode (`tui.vim_keys=true`): `j/k` up/down, `gg` top, `G` bottom.
+    - Arrow mode (`tui.vim_keys=false`): `↑/↓` up/down, `Home` top, `End` bottom.
 - **Right preview**: Shows full information of selected item (read‑only).
 - **Enter detail**: Press `Enter`.
 
@@ -326,7 +325,7 @@ Updated:    2026-08-22 09:15
     - **Visible sources**: Checkboxes; modifies `contexts.tui` and refreshes list immediately.
     - **Write source**: Dropdown; modifies `defaults.write_source`.
     - **Filter**: Radio buttons (`Todo`, `Event`, `Both`); modifies `ui.default_filter`.
-    - **Keybindings**: Radio (`Vim` / `Arrow`); modifies `ui.vim_keys`.
+    - **Keybindings**: Radio (`Vim` / `Arrow`); modifies `tui.vim_keys`.
 - **Persistence**: Clicking **`Apply`** atomically writes to `config.toml` using `toml_edit`. **`Cancel`** discards changes.
 
 ### 5.5 Global Key Bindings

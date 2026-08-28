@@ -102,14 +102,15 @@ SOURCES
 CONFIG (two tiers)
   config.default.toml  complete default reference — self-contained; lists every default option (what calman uses with no config file)
   config.example.toml  annotated custom sample (copy & edit)
-  include = ["config.default.toml", "report.default.toml", "theme.default.toml"]
+  include = ["config.default.toml", "colorscheme.example.toml"]
 "#
     );
 }
 
 /// Open the storage backend for a source.
-pub fn open_storage(src: &Source) -> Result<Store> {
+pub fn open_storage(conf: &Config, src: &Source) -> Result<Store> {
     let loc = src.abs_location();
+    let tz = conf.date.tz();
     Ok(match src.source_type {
         #[cfg(feature = "storage-jsonl")]
         SourceType::Jsonl => Store::Jsonl(JsonlStorage::open(&loc)?),
@@ -118,7 +119,7 @@ pub fn open_storage(src: &Source) -> Result<Store> {
             bail!("this build was compiled without the `storage-jsonl` feature")
         }
         #[cfg(feature = "storage-ics")]
-        SourceType::Ics => Store::Ics(IcsStorage::open(&loc)?),
+        SourceType::Ics => Store::Ics(IcsStorage::open(&loc, tz)?),
         #[cfg(not(feature = "storage-ics"))]
         SourceType::Ics => {
             bail!("this build was compiled without the `storage-ics` feature")
@@ -163,10 +164,10 @@ pub fn resolve_sources(
 /// Taskwarrior-style numbering: the **oldest** task gets ID 1. Rows are
 /// ordered by `created_at` (ties broken by UID) before IDs are assigned, so
 /// IDs stay stable across sessions regardless of storage iteration order.
-pub fn load_merged(sources: &[Source]) -> Result<Vec<Row>> {
+pub fn load_merged(conf: &Config, sources: &[Source]) -> Result<Vec<Row>> {
     let mut rows = Vec::new();
     for src in sources {
-        let st = open_storage(src)?;
+        let st = open_storage(conf, src)?;
         for t in st.list() {
             let mut t = t.clone();
             t.source = src.name.clone();
@@ -199,7 +200,7 @@ pub fn resolve_targets(
     ids: &[String],
 ) -> Result<Vec<(String, String)>> {
     let sources = resolve_sources(conf, override_, ContextKind::Cli)?;
-    let rows = load_merged(&sources)?;
+    let rows = load_merged(conf, &sources)?;
     let mut out = Vec::new();
     for id in ids {
         if let Ok(n) = id.parse::<usize>() {
@@ -221,7 +222,7 @@ pub fn resolve_targets(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::SourceType;
+    use crate::config::{Config, SourceType};
     use tempfile::tempdir;
 
     fn source(dir: &std::path::Path, name: &str) -> Source {
@@ -245,7 +246,7 @@ mod tests {
         st.add(first).unwrap();
         drop(st);
 
-        let rows = load_merged(&[source(dir.path(), "work")]).unwrap();
+        let rows = load_merged(&Config::default(), &[source(dir.path(), "work")]).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].id, 1);
         assert_eq!(rows[0].task.summary, "older");
@@ -263,7 +264,7 @@ mod tests {
             st.add(t).unwrap();
         }
         // complete the middle task
-        let rows_all = load_merged(&[source(dir.path(), "work")]).unwrap();
+        let rows_all = load_merged(&Config::default(), &[source(dir.path(), "work")]).unwrap();
         let uid_b = rows_all[1].task.uid.clone();
         let mut st = crate::storage::jsonl::JsonlStorage::open(dir.path()).unwrap();
         st.update(&uid_b, |t| {
@@ -272,7 +273,7 @@ mod tests {
         })
         .unwrap();
 
-        let rows = load_merged(&[source(dir.path(), "work")]).unwrap();
+        let rows = load_merged(&Config::default(), &[source(dir.path(), "work")]).unwrap();
         // actives = a (1), c (3); completed b keeps id 2 in the full index
         let f = crate::filter::parse_expr(&["status:active".to_string()]).unwrap();
         let shown: Vec<usize> = rows
