@@ -17,8 +17,8 @@ sync = ["work"]                 # Sources for `sync` by default
 tui = ["work", "personal"]      # Sources shown when `tui` starts
 
 [date]
-workweek_end = "17:00"          # Time used for `eoww` calculation
-week_start = "monday"           # First day of the week
+workweek_end = "17:00"          # Reserved: `eoww` is currently hardcoded to Friday 17:00
+week_start = "monday"           # Reserved: the week currently always starts on Monday
 
 [ui]
 theme = "default"               # default | dark | light
@@ -123,6 +123,8 @@ pub enum TaskStatus { Pending, InProgress, Completed, Cancelled }
     }
     ```
 
+> UIDs are random v4 UUIDs — `uid_counter` is a monotonic write counter (incremented on every `touch()`), never read to generate a UID.
+
 ---
 
 ## 3. Synchronisation Mechanism (Sync)
@@ -156,10 +158,10 @@ calman [source:<source1,source2,...>] <COMMAND> [ARGS]
 ### 4.2 Subcommand Specifications
 
 The CLI is **Taskwarrior‑style free‑form**: filters/attributes can appear before or
-after the command, the command is optional, and the default report is `list`.
+after the command, the command is optional, and the default report is `next`.
 
 ```bash
-calman                          # ≡ calman list
+calman                          # ≡ calman next
 calman +PENDING                 # list, filtered
 calman +OVERDUE list            # command may follow filters
 calman add <TEXT> [ATTRS...]
@@ -178,15 +180,21 @@ calman modify <TEXT> [ATTRS...] # bare text replaces the summary
     - Event fields (`start:` present → event, absent → todo):
         - `start:<DATE>` / `end:<DATE>` — forms below; `end` treated the same as `start`
         - `duration:<DUR>` — `45min`, `1h`, `1h30m`, `2d`; alternative to `end:`
-        - `allday` — force all-day (date‑only); date‑only `start:` auto‑all‑day
+        - `allday` — force all‑day (date‑only); date‑only `start:` auto‑all‑day
         - `alert:<DUR>` — VALARM lead time, e.g. `alert:15min` → `TRIGGER:-PT900S`
-        - `location:<TEXT>`, `repeat:<RRULE>`
-    - All‑day `end` is **inclusive** as typed; stored `DTEND` = day after (CalDAV convention).
+        - `location:<TEXT>`, `recur:<RULE>` — recurrence; alias `repeat:`
+    - Date‑only `due:` (Todo) is an all‑day todo: stored as `DUE;VALUE=DATE` and
+      `task.allday = true`; overdue rule from `[date] due_date_overdue_today`.
+    - `recur:`/`repeat:` is normalized to a standard RFC 5545 `RRULE` by
+      `recurrence.rs`: raw `FREQ=…` passthrough, or friendly `daily/weekly/
+      monthly/yearly`, `every 7d`/`2 weeks` (→`INTERVAL`), `every tue and fri`/
+      `weekend` (→`BYDAY`), `for 5 times`/`for 7 weeks` (weeks×weekday→`COUNT`),
+      `count:N`, `until:<date>`/`until:eoy`/`until:eom`.
     - No `end:`/`duration:` → `[date] default_event_duration` (default `1h`); all‑day with no end → single day (no `DTEND`).
 
 **Date input forms** (start/end/due): `20260812` (all‑day), `20260826-0900`, `0826` (this year), `17` (this month), `-0900` (today), `YYYY-MM-DD [HH:MM]`, named dates, `+3d`.
 
-#### B. `list` — List tasks (default report)
+#### B. `list` — Long list report
 - **Syntax**: `calman [FILTERS...] [list]`
 - **Data sources**: Uses `contexts.cli` or `source:`-specified sources.
 - **Output**: Table with a dynamic short ID per row (numbered across all selected sources). No `--format` flag.
@@ -203,6 +211,11 @@ calman modify <TEXT> [ATTRS...] # bare text replaces the summary
     - `+OVERDUE`: overdue and not completed
     - `+PENDING`: active tasks, events count as pending
     - `+COMPLETED` / `+CANCELLED` / `+IN-PROCESS` / `+TAGGED` / `+UNTAGGED` / `+SCHEDULED`
+
+Precedence: adjacent atoms are `and`; `and` binds tighter than `or`.
+`A B or C D` = `(A and B) or (C and D)`; use parentheses to group.
+`type:event` / `type:todo` select a single kind; builtin report filters still
+apply on top (future events only) unless overridden with `rc.report.*.filter=`.
 
 CLI custom report overrides (Taskwarrior rc style, script-friendly):
 

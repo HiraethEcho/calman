@@ -99,8 +99,8 @@ pub fn parse_source_ref(name: &str) -> Option<(String, String)> {
     }
 
     // Handle quoted collection names
-    let collection = if collection_part.starts_with('"') {
-        let end = collection_part[1..].find('"')?;
+    let collection = if let Some(inner) = collection_part.strip_prefix('"') {
+        let end = inner.find('"')?;
         collection_part[1..end + 1].to_string()
     } else {
         collection_part.to_string()
@@ -148,17 +148,16 @@ pub fn expand_ics_dir(source: &Source) -> Result<Vec<Source>> {
 pub fn resolve_source_name(sources: &[Source], name: &str) -> Result<Vec<Source>> {
     // Check if it's a composite reference
     if let Some((source_name, collection)) = parse_source_ref(name) {
-        if let Some(parent) = sources.iter().find(|s| s.name == source_name) {
-            if parent.source_type == SourceType::IcsDir {
-                if let Some(path) = resolve_collection_path(parent, &collection)? {
-                    return Ok(vec![Source {
-                        name: name.to_string(),
-                        source_type: SourceType::Ics,
-                        location: path.to_string_lossy().to_string(),
-                        sync: parent.sync.clone(),
-                    }]);
-                }
-            }
+        if let Some(parent) = sources.iter().find(|s| s.name == source_name)
+            && parent.source_type == SourceType::IcsDir
+            && let Some(path) = resolve_collection_path(parent, &collection)?
+        {
+            return Ok(vec![Source {
+                name: name.to_string(),
+                source_type: SourceType::Ics,
+                location: path.to_string_lossy().to_string(),
+                sync: parent.sync.clone(),
+            }]);
         }
         anyhow::bail!("unknown source `{name}`");
     }

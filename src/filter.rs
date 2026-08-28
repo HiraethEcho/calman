@@ -71,12 +71,24 @@ pub enum Expr {
 }
 
 impl Expr {
+    /// Matches with the default overdue policy (all-day due overdue only after its day).
+    #[allow(dead_code)] // convenience wrapper; production uses `matches_with`
     pub fn matches(&self, t: &Task) -> bool {
+        self.matches_with(t, false)
+    }
+
+    /// `overdue_allday_today` selects whether a date-only `due` counts as
+    /// overdue starting on its own day (per `[date].due_date_overdue_today`).
+    pub fn matches_with(&self, t: &Task, overdue_allday_today: bool) -> bool {
         match self {
-            Expr::Atom(f) => f.matches(t),
-            Expr::Not(e) => !e.matches(t),
-            Expr::And(a, b) => a.matches(t) && b.matches(t),
-            Expr::Or(a, b) => a.matches(t) || b.matches(t),
+            Expr::Atom(f) => f.matches_with(t, overdue_allday_today),
+            Expr::Not(e) => !e.matches_with(t, overdue_allday_today),
+            Expr::And(a, b) => {
+                a.matches_with(t, overdue_allday_today) && b.matches_with(t, overdue_allday_today)
+            }
+            Expr::Or(a, b) => {
+                a.matches_with(t, overdue_allday_today) || b.matches_with(t, overdue_allday_today)
+            }
         }
     }
 }
@@ -87,7 +99,12 @@ pub fn task_date(t: &Task) -> Option<DateTime<Utc>> {
 }
 
 impl Filter {
+    #[allow(dead_code)] // convenience wrapper; production uses `matches_with`
     pub fn matches(&self, t: &Task) -> bool {
+        self.matches_with(t, false)
+    }
+
+    pub fn matches_with(&self, t: &Task, overdue_allday_today: bool) -> bool {
         if let Some(s) = self.status
             && t.status != s
         {
@@ -123,7 +140,7 @@ impl Filter {
             }
         }
         for f in &self.flags {
-            if !flag_matches(*f, t) {
+            if !flag_matches(*f, t, overdue_allday_today) {
                 return false;
             }
         }
@@ -136,7 +153,7 @@ impl Filter {
     }
 }
 
-fn flag_matches(f: Flag, t: &Task) -> bool {
+fn flag_matches(f: Flag, t: &Task, overdue_allday_today: bool) -> bool {
     match f {
         Flag::Pending => t.status.is_active(),
         Flag::Completed => t.status == TaskStatus::Completed,
@@ -145,7 +162,26 @@ fn flag_matches(f: Flag, t: &Task) -> bool {
         Flag::Tagged => !t.tags.is_empty(),
         Flag::Untagged => t.tags.is_empty(),
         Flag::Scheduled => t.is_event(),
-        Flag::Overdue => task_date(t).is_some_and(|d| d < Utc::now()) && t.status.is_active(),
+        Flag::Overdue => {
+            let Some(d) = task_date(t) else {
+                return false;
+            };
+            if !t.status.is_active() {
+                return false;
+            }
+            if t.allday {
+                // Date-only (all-day) task: compare local calendar days.
+                let due_day = d.with_timezone(&Local).date_naive();
+                let today = Local::now().date_naive();
+                if overdue_allday_today {
+                    today >= due_day
+                } else {
+                    today > due_day
+                }
+            } else {
+                d < Utc::now()
+            }
+        }
     }
 }
 

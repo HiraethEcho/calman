@@ -7,7 +7,7 @@
 //! - `calman +OVERDUE list`
 //! - `calman count status:pending`
 
-use crate::date_parser::parse_datetime;
+use crate::date_parser::{DateValue, local_midnight, parse_date_value};
 use crate::model::{TaskStatus, priority_from_str};
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
@@ -23,16 +23,7 @@ pub enum Command {
     Count,
     Sync,
     Tui,
-}
-
-/// How a `due` attribute applies in filters.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum DueMod {
-    #[default]
-    On,
-    Before,
-    By,
-    After,
+    Help,
 }
 
 /// A Taskwarrior-style `rc.report.<name>.<key>=<value>` override from argv.
@@ -54,32 +45,12 @@ pub struct ParsedArgs {
     pub text: String,
     pub priority: Option<u8>,
     pub due: Option<DateTime<Utc>>,
-    pub due_mod: DueMod,
+    /// `due:` was given as a date-only value (all-day semantics).
+    pub due_allday: bool,
     pub status: Option<TaskStatus>,
     pub tags: Vec<String>,
     pub anti_tags: Vec<String>,
-    pub overdue: bool,
-    pub pending: bool,
-    pub completed: bool,
-    pub active: bool,
-    pub cancelled: bool,
-    pub in_progress: bool,
-    pub tagged: bool,
-    pub untagged: bool,
-    pub scheduled: bool,
-    pub r#type: Option<String>,
-    pub anti_source: Option<String>,
     pub rel: Option<String>,
-    pub anti_pending: bool,
-    pub anti_active: bool,
-    pub anti_completed: bool,
-    pub anti_cancelled: bool,
-    pub anti_in_progress: bool,
-    pub anti_overdue: bool,
-    pub anti_tagged: bool,
-    pub anti_untagged: bool,
-    pub anti_scheduled: bool,
-    pub anti_type: Option<String>,
     /// `rc.report.<name>.<key>=<value>` tokens (e.g. columns/labels).
     pub rc_reports: Vec<RcReport>,
     /// Raw filter tokens (post-command, non-rc, non-id) for list/count.
@@ -153,28 +124,21 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
         } else if tok.len() > 7 && tok[..7].eq_ignore_ascii_case("source:") {
             q.sources
                 .extend(tok[7..].split(',').map(|s| s.trim().to_string()));
-        } else if tok.len() > 8 && tok[..8].eq_ignore_ascii_case("-source:") {
-            q.anti_source = Some(tok[8..].to_string());
-        } else if let Some(rest) = lower.strip_prefix("due.before:") {
-            q.due = Some(parse_datetime(rest)?);
-            q.due_mod = DueMod::Before;
-        } else if let Some(rest) = lower.strip_prefix("due.by:") {
-            q.due = Some(parse_datetime(rest)?);
-            q.due_mod = DueMod::By;
-        } else if let Some(rest) = lower.strip_prefix("due.after:") {
-            q.due = Some(parse_datetime(rest)?);
-            q.due_mod = DueMod::After;
         } else if let Some(rest) = lower.strip_prefix("due:") {
-            q.due = Some(parse_datetime(rest)?);
-            q.due_mod = DueMod::On;
+            let dv = parse_date_value(rest)?;
+            let dtv = match dv {
+                DateValue::Date(d) => {
+                    q.due_allday = true;
+                    local_midnight(d)
+                }
+                DateValue::Time(dt) => dt,
+            };
+            q.due = Some(dtv);
         } else if let Some(rest) = lower.strip_prefix("status:") {
-            if rest == "active" {
-                q.active = true;
-            } else {
+            // `active` is a filter-only status; `status:<x>` also feeds modify.
+            if rest != "active" {
                 q.status = Some(parse_status(rest)?);
             }
-        } else if let Some(rest) = lower.strip_prefix("type:") {
-            q.r#type = Some(rest.to_string());
         } else if let Some(rest) = lower.strip_prefix("rel:") {
             q.rel = Some(rest.to_string());
         } else if let Some(rest) = lower.strip_prefix("start:") {
@@ -183,7 +147,10 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
             q.end = Some(rest.to_string());
         } else if let Some(rest) = lower.strip_prefix("location:") {
             q.location = Some(rest.to_string());
-        } else if let Some(rest) = lower.strip_prefix("repeat:") {
+        } else if let Some(rest) = lower
+            .strip_prefix("repeat:")
+            .or_else(|| lower.strip_prefix("recur:"))
+        {
             q.repeat = Some(rest.to_string());
         } else if let Some(rest) = lower.strip_prefix("duration:") {
             q.duration = Some(rest.to_string());
@@ -196,38 +163,15 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
         } else if lower == "allday" || lower == "+allday" {
             q.allday = true;
         } else if tok.starts_with('+') && tok.len() > 1 {
-            match lower.as_str() {
-                "+overdue" => q.overdue = true,
-                "+pending" => q.pending = true,
-                "+completed" | "+done" => q.completed = true,
-                "+active" => q.active = true,
-                "+cancelled" | "+canceled" => q.cancelled = true,
-                "+in-progress" | "+inprogress" | "+in-process" | "+inprocess" | "+started" => {
-                    q.in_progress = true
-                }
-                "+tagged" => q.tagged = true,
-                "+untagged" => q.untagged = true,
-                "+scheduled" => q.scheduled = true,
-                "+todo" => q.r#type = Some("todo".to_string()),
-                "+event" => q.r#type = Some("event".to_string()),
-                _ => q.tags.push(tok[1..].to_string()),
+            let name = &tok[1..];
+            if name.eq_ignore_ascii_case("allday") {
+                q.allday = true;
+            } else if !is_filter_only_plus(name) {
+                q.tags.push(name.to_string());
             }
         } else if tok.starts_with('-') && tok.len() > 1 {
-            match &lower[1..] {
-                "overdue" => q.anti_overdue = true,
-                "completed" | "done" => q.anti_completed = true,
-                "cancelled" | "canceled" => q.anti_cancelled = true,
-                "active" => q.anti_active = true,
-                "in-progress" | "inprogress" | "in-process" | "inprocess" | "started" => {
-                    q.anti_in_progress = true
-                }
-                "pending" => q.anti_pending = true,
-                "tagged" => q.anti_tagged = true,
-                "untagged" => q.anti_untagged = true,
-                "scheduled" => q.anti_scheduled = true,
-                "todo" => q.anti_type = Some("todo".to_string()),
-                "event" => q.anti_type = Some("event".to_string()),
-                _ => q.anti_tags.push(tok[1..].to_string()),
+            if !is_filter_only_minus(&lower[1..]) {
+                q.anti_tags.push(tok[1..].to_string());
             }
         } else {
             push_text(&mut q, tok);
@@ -237,6 +181,61 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
     }
 
     Ok(q)
+}
+
+/// Filter/virtual tokens that `add`/`modify` must not treat as literal tags.
+/// They are still recorded in `filter_tokens` for `list`/`count`.
+fn is_filter_only_plus(name: &str) -> bool {
+    let l = name.to_ascii_lowercase();
+    matches!(
+        l.as_str(),
+        "overdue"
+            | "pending"
+            | "completed"
+            | "done"
+            | "active"
+            | "cancelled"
+            | "canceled"
+            | "in-progress"
+            | "inprogress"
+            | "in-process"
+            | "inprocess"
+            | "started"
+            | "tagged"
+            | "untagged"
+            | "scheduled"
+            | "todo"
+            | "event"
+    )
+}
+
+fn is_filter_only_minus(name: &str) -> bool {
+    let l = name.to_ascii_lowercase();
+    matches!(
+        l.as_str(),
+        "overdue"
+            | "pending"
+            | "completed"
+            | "done"
+            | "active"
+            | "cancelled"
+            | "canceled"
+            | "in-progress"
+            | "inprogress"
+            | "in-process"
+            | "inprocess"
+            | "started"
+            | "tagged"
+            | "untagged"
+            | "scheduled"
+            | "todo"
+            | "event"
+    ) || l.starts_with("status:")
+        || l.starts_with("source:")
+        || l.starts_with("type:")
+        || l.starts_with("priority:")
+        || l.starts_with("pri:")
+        || l.starts_with("due")
 }
 
 fn parse_rc(tok: &str) -> Result<Option<RcReport>> {
@@ -272,6 +271,7 @@ fn command_word(tok: &str) -> Option<(Command, Option<String>)> {
         "count" => (Command::Count, None),
         "sync" => (Command::Sync, None),
         "tui" => (Command::Tui, None),
+        "help" | "filters" => (Command::Help, None),
         _ => return None,
     };
     Some((cmd, report))
@@ -313,8 +313,9 @@ mod tests {
     #[test]
     fn bare_means_list() {
         assert_eq!(p(&[]).cmd, None);
-        assert_eq!(p(&["+PENDING"]).cmd, None);
-        assert!(p(&["+PENDING"]).pending);
+        let q = p(&["+PENDING"]);
+        assert_eq!(q.cmd, None);
+        assert_eq!(q.filter_tokens, vec!["+PENDING"]);
     }
 
     #[test]
@@ -338,7 +339,7 @@ mod tests {
     fn filter_before_command() {
         let q = p(&["+OVERDUE", "list"]);
         assert_eq!(q.cmd, Some(Command::List));
-        assert!(q.overdue);
+        assert_eq!(q.filter_tokens, vec!["+OVERDUE"]);
     }
 
     #[test]
@@ -439,7 +440,6 @@ mod tests {
             q.filter_tokens,
             vec!["+PENDING", "source:work", "-source:personal"]
         );
-        assert_eq!(q.anti_source.as_deref(), Some("personal"));
     }
 
     #[test]
@@ -448,5 +448,28 @@ mod tests {
         assert_eq!(q.cmd, Some(Command::List));
         assert_eq!(q.filter_tokens, Vec::<String>::new());
         assert_eq!(q.rc_reports.len(), 1);
+    }
+
+    #[test]
+    fn add_does_not_treat_virtual_tags_as_literal_tags() {
+        let q = p(&["add", "x", "+overdue", "+home", "-scheduled"]);
+        assert_eq!(q.tags, vec!["home"]);
+        assert!(q.anti_tags.is_empty());
+    }
+
+    #[test]
+    fn help_command() {
+        let q = p(&["help"]);
+        assert_eq!(q.cmd, Some(Command::Help));
+        let q2 = p(&["filters"]);
+        assert_eq!(q2.cmd, Some(Command::Help));
+    }
+
+    #[test]
+    fn recur_is_alias_for_repeat() {
+        let q = p(&["add", "x", "recur:daily"]);
+        assert_eq!(q.repeat.as_deref(), Some("daily"));
+        let q2 = p(&["add", "x", "repeat:weekly"]);
+        assert_eq!(q2.repeat.as_deref(), Some("weekly"));
     }
 }

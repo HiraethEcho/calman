@@ -67,15 +67,20 @@ columns = [
 
 # ------------------------------------------------------------------- [icons]
 # 全局图标覆盖 (可选; 缺失的键回落到内置默认)
+# 合并后的 STATUS 列按任务类型取表: todo → [icons.todo], event → [icons.event]
 [icons]
-[icons.status]                       # 内置: pending=○ in-progress=● completed=✓ cancelled=✕
+[icons.todo]                         # VTODO: pending=○ in-progress=● completed=✓ cancelled=✕
 pending = "○"
 in-progress = "●"
 completed = "✓"
 cancelled = "✕"
 
-[icons.type]                         # 内置: todo=󰄰 event=󰃭
-todo = "󰄰"
-event = "󰃭"
+[icons.event]                        # VEVENT: pending/confirmed=○, cancelled=✕ (无 completed)
+pending = "○"
+in-progress = "●"
+completed = "✓"
+cancelled = "✕"
+
+# 自定义 field = "type" 列仍可用列级 icons { todo=..., event=... }
 
 # 行级颜色规则在 theme.example.toml 的 [theme] / [theme.color] 中定义:

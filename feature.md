@@ -32,17 +32,55 @@ calman rc.report.next.filter='type:event due.after:sod' list
 supported rc keys: `columns`, `labels`, `filter`, `sort`.
 `columns` accepts `field` or `field.format` (comma-separated).
 
+Precedence: adjacent atoms = `and`; `and` binds tighter than `or`.
+Use parens when the range is ambiguous:
+
+```
+A B or C D   = (A and B) or (C and D)   # NOT A and (B or C) and D
+(A or B) C   = (A or B) and C
+```
+
+Separating events and todos:
+
+```
+calman type:event              # events only; builtin default still limits to future
+calman type:todo +PENDING      # active todos only
+calman rc.report.next.filter='type:event due.after:20260101' next  # all events incl. past
+calman count type:event        # all events regardless of report defaults
+```
+
 ### date
 
-for date, support eonnd, soppw. that is, the day after next day, the week before previous week.
+for date, support eond, sopw. that is, the end of next day, the start of the previous week.
+
+a date-only `due:` (e.g. `due:20260826`, `due:tomorrow`) is an all-day todo:
+- stored as `DUE;VALUE=DATE` in ICS (no time component)
+- `task.allday = true`; events keep the same flag for `DTSTART;VALUE=DATE`
+- overdue rule is config-driven: `[date] due_date_overdue_today`
+  - `false` (default): overdue only after the due day passes
+  - `true`: overdue starting on the due day itself
 
 ### recursive and repeat
 
-design repeat even and todo cmd. use `recur:` not `repeat:`
-every 7d, week, 3d, month, 30d etc.
-two way for duration. repeat times and until date. for example, i want do something every friday and for 5 times, or i want to exercise every weekend, until end of the year.
+use `recur:` (alias `repeat:`) for both todo and event.
+calman normalizes it to a standard RFC 5545 `RRULE` (iOS Reminders / CalDAV
+compatible). It accepts either a raw rule or a friendly expression:
 
-also, how to set every Tuesday and Friday for each week, and 7 weeks total? (a typical case for school class)
+- raw passthrough: `recur:FREQ=WEEKLY;BYDAY=TU,FR;UNTIL=20260925`
+- frequency: `daily` `weekly` `monthly` `yearly`
+- interval: `every 7d` / `7d` / `every 2 weeks` (→ `INTERVAL=`)
+- weekdays: `every tuesday and friday` / `every weekend` (→ `BYDAY=`)
+- end: `for 5 times` / `for 7 weeks` (weeks × weekday count → `COUNT=`)
+  / `count:5` / `until:20260925` / `until:eoy` / `until:eom`
+
+examples:
+- `recur:every friday for 5 times` → `FREQ=WEEKLY;BYDAY=FR;COUNT=5`
+- `recur:every tuesday and friday for 7 weeks` → `FREQ=WEEKLY;BYDAY=TU,FR;COUNT=14`
+- `recur:every weekend until:eoy` → `FREQ=WEEKLY;BYDAY=SA,SU;UNTIL=20261231`
+- iPhone-created: `RRULE:FREQ=DAILY;UNTIL=20260925` (round-trips as-is)
+
+design repeat even and todo cmd. also, how to set every Tuesday and Friday for
+each week, and 7 weeks total? (a typical case for school class)
 
 
 ### report
@@ -103,45 +141,53 @@ Columns:
 - `format`: `relative | countdown | iso | truncate`; `width` = min-width
 - `sort`: `key+`/`key-`, trailing `/` = break line (taskwarrior style); keys incl. `id, created, updated, due, pri, status, summary`
 
-Icons (nerdfont), 3-level fallback: column `icons` > global `[icons]` > builtin defaults:
+Icons (nerdfont), 3-level fallback: column `icons` > global `[icons]` > builtin defaults.
+Merged STATUS column is per-kind: todos use `[icons.todo]`, events use `[icons.event]`.
+Both tables keyed by status: `pending`, `in-progress`, `completed`, `cancelled`.
+(VEVENT only has TENTATIVE/CONFIRMED/CANCELLED in iCalendar; completed is
+internal-only.)
 
 ```toml
 [icons]
-[icons.status]
+[icons.todo]
 pending = "○"
 in-progress = "●"
 completed = "✓"
 cancelled = "✕"
 
-[icons.type]
-todo = "󰄰"
-event = "󰃭"
+[icons.event]
+pending = "○"
+in-progress = "●"
+completed = "✓"
+cancelled = "✕"
 
 [report.ls]
 columns = [
   { field = "status", label = "ST", icon = true,
-    icons = { completed = "✔" } },   # per-column override, rest fall back
+    icons = { completed = "✔", pending = "◌" } },   # per-column override, rest fall back
 ]
 ```
 
-Colors: global rules, row-level, first match wins:
+Colors: global row-level rules use the taskwarrior `custom.theme` format under `[theme]`:
 
 ```toml
-[[color]]
-name = "overdue"
-fg = "red"
-bold = true
-filter = "status:pending due.before:now"
+[theme]
+name = "default"
+"rule.precedence.color" = "completed,active,overdue,due.today,due,blocked,blocking,scheduled,tagged"
+
+[theme.color]
+completed = "gray10 on gray2"
+overdue = "inverse"
 ```
 
-Style fields: `fg, bg, bold, underline, italic, dim`.
+Style: `fg [on bg] [bold|underline|italic|dim|inverse]`. Rules: `completed active overdue due.today due blocked blocking scheduled tagged uda.priority.L|M|H`. The first defined rule that matches wins.
 
 Builtin virtual tags (evaluated at runtime, usable in filters):
 
 - `OVERDUE` — derived: `due < now` && status active
 - `DONE` ≡ `COMPLETED` — alias; maps to `STATUS:COMPLETED` + `COMPLETED` timestamp
 - `CANCELLED` — `STATUS:CANCELLED`
-- `IN-PROCESS` — `STATUS:IN-PROCESS`
+- `IN-PROGRESS` — `STATUS:IN-PROGRESS`
 - `TAGGED` / `UNTAGGED` — derived from `CATEGORIES`
 - `TODO` / `EVENT` — task type
 - `SCHEDULED` — event 的定时即 `DTSTART`, 无需额外字段

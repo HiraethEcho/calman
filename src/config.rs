@@ -110,13 +110,15 @@ pub struct ReportCfg {
     pub columns: Vec<ColumnCfg>,
 }
 
-/// `[icons]` — global nerdfont icon overrides for status/type.
+/// `[icons]` — global nerdfont icon overrides per task kind.
+/// `[icons.todo]` and `[icons.event]` map status keys to glyphs:
+/// `pending`, `in-progress`, `completed`, `cancelled`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IconsCfg {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub status: HashMap<String, String>,
-    #[serde(default, rename = "type", skip_serializing_if = "HashMap::is_empty")]
-    pub r#type: HashMap<String, String>,
+    pub todo: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub event: HashMap<String, String>,
 }
 
 /// `[contexts]` — default source lists per context.
@@ -143,6 +145,10 @@ pub struct DateConfig {
     /// Fallback event length when neither `end:` nor `duration:` given (e.g. "1h").
     #[serde(default = "default_event_duration")]
     pub default_event_duration: String,
+    /// For a date-only `due` (all-day todo), whether it counts as `overdue`
+    /// starting on its own day (`true`) or only after the day passes (`false`).
+    #[serde(default = "default_due_date_overdue_today")]
+    pub due_date_overdue_today: bool,
 }
 
 /// `[ui]` — TUI settings.
@@ -225,6 +231,10 @@ fn default_event_duration() -> String {
     "1h".to_string()
 }
 
+fn default_due_date_overdue_today() -> bool {
+    false
+}
+
 impl Default for DateConfig {
     fn default() -> Self {
         Self {
@@ -232,6 +242,7 @@ impl Default for DateConfig {
             week_start: default_week_start(),
             default_start_time: default_start_time(),
             default_event_duration: default_event_duration(),
+            due_date_overdue_today: default_due_date_overdue_today(),
         }
     }
 }
@@ -569,7 +580,7 @@ sort = ["due+"]
 columns = [
   { field = "id", label = "ID" },
 ]
-[icons.status]
+[icons.todo]
 pending = "○"
 "#,
         )
@@ -590,10 +601,7 @@ overdue = "inverse"
 
         let cfg = Config::load_from(&main).unwrap();
         assert!(cfg.reports.contains_key("next"));
-        assert_eq!(
-            cfg.icons.status.get("pending").map(|s| s.as_str()),
-            Some("○")
-        );
+        assert_eq!(cfg.icons.todo.get("pending").map(|s| s.as_str()), Some("○"));
         assert_eq!(cfg.ui.theme, "dark");
         let theme = cfg.theme.unwrap();
         assert_eq!(theme.precedence.as_deref(), Some("completed,overdue"));

@@ -193,8 +193,9 @@ fn date_col(label: &str, todo_format: &str) -> Column {
 /// Builtin `ls` / `list` / `next` reports (overridable via config).
 ///
 /// Per feature.md `more on report`: only future events are shown by default
-/// (including today), the type/status columns are merged (event = calendar
-/// icon), and DUE is relabelled DATE (event → plain date, todo → relative).
+/// (including today), the type/status columns are merged (both render a
+/// status glyph from `[icons.todo]` / `[icons.event]`), and DUE is relabelled
+/// DATE (event → plain date, todo → relative).
 fn builtin(name: &str) -> Report {
     let (filter, sort, columns) = match name {
         "ls" => (
@@ -326,19 +327,13 @@ fn cell(conf: &Config, r: &Row, c: &Column) -> String {
     let t = &r.task;
     match c.field.as_str() {
         "id" => r.id.to_string(),
-        // Merged type/status: events show a calendar glyph, todos show their
-        // status (feature.md `more on report`).
+        // Merged type/status: both kinds show a status glyph; the per-kind
+        // global tables `[icons.todo]` / `[icons.event]` pick the glyph.
         "status" => {
-            if t.is_event() {
-                return if c.icon {
-                    icon(conf, "type", "event", c)
-                } else {
-                    "event".to_string()
-                };
-            }
             let st = status_txt(t.status);
+            let kind = if t.is_event() { "event" } else { "todo" };
             if c.icon {
-                icon(conf, "status", st, c)
+                icon(conf, kind, st, c)
             } else {
                 st.to_string()
             }
@@ -346,7 +341,7 @@ fn cell(conf: &Config, r: &Row, c: &Column) -> String {
         "type" => {
             let ty = if t.is_event() { "event" } else { "todo" };
             if c.icon {
-                icon(conf, "type", ty, c)
+                icon_type(c, ty)
             } else {
                 ty.to_string()
             }
@@ -354,9 +349,9 @@ fn cell(conf: &Config, r: &Row, c: &Column) -> String {
         "summary" => maybe_truncate(t.summary.as_str(), c),
         "desc" => maybe_truncate(t.description.as_deref().unwrap_or(""), c),
         "tags" => t.tags.join(","),
-        "date" => date_str(r, c),
+        "date" => date_str(conf, r, c),
         // Backwards-compatible alias: `due` == `date`.
-        "due" => date_str(r, c),
+        "due" => date_str(conf, r, c),
         "pri" => pri_str(t.priority),
         "source" => t.source.clone(),
         _ => String::new(),
@@ -375,7 +370,7 @@ fn maybe_truncate(s: &str, c: &Column) -> String {
     s.to_string()
 }
 
-fn date_str(r: &Row, c: &Column) -> String {
+fn date_str(conf: &Config, r: &Row, c: &Column) -> String {
     let dt = crate::filter::task_date(&r.task);
     let Some(dt) = dt else {
         return String::new();
@@ -388,10 +383,39 @@ fn date_str(r: &Row, c: &Column) -> String {
             None => local.format("%m/%d").to_string(),
         };
     }
+    if r.task.allday {
+        // All-day todos: compare by calendar day so the display agrees with
+        // the `+OVERDUE` filter (which honours `due_date_overdue_today`).
+        return allday_date_str(c, &local, conf.date.due_date_overdue_today);
+    }
     match c.todo_format.as_deref().or(c.format.as_deref()) {
         Some("relative") => relative(&local, &Local::now()),
         Some("countdown") => countdown(&local, &Local::now()),
         Some(f) => fmt_date(&local, f),
+        None => local.format("%Y-%m-%d").to_string(),
+    }
+}
+
+/// All-day date column: day-granular relative/countdown, else formatted date.
+fn allday_date_str(c: &Column, local: &DateTime<Local>, overdue_today: bool) -> String {
+    let day = local.date_naive();
+    let today = Local::now().date_naive();
+    let days = day.signed_duration_since(today).num_days();
+    match c.todo_format.as_deref().or(c.format.as_deref()) {
+        Some("relative") | Some("countdown") => {
+            if days < 0 {
+                "overdue".to_string()
+            } else if days == 0 {
+                if overdue_today {
+                    "overdue".to_string()
+                } else {
+                    "today".to_string()
+                }
+            } else {
+                format!("{days}d")
+            }
+        }
+        Some(f) => fmt_date(local, f),
         None => local.format("%Y-%m-%d").to_string(),
     }
 }
@@ -463,40 +487,49 @@ fn status_txt(s: TaskStatus) -> &'static str {
     }
 }
 
-fn icon(conf: &Config, field: &str, val: &str, c: &Column) -> String {
+fn icon(conf: &Config, kind: &str, val: &str, c: &Column) -> String {
     if let Some(g) = c.icons.get(val) {
         return g.clone();
     }
-    match field {
-        "status" => {
-            if let Some(g) = conf.icons.status.get(val) {
-                return g.clone();
-            }
-        }
-        "type" => {
-            if let Some(g) = conf.icons.r#type.get(val) {
-                return g.clone();
-            }
-        }
-        _ => {}
+    let map = if kind == "event" {
+        &conf.icons.event
+    } else {
+        &conf.icons.todo
+    };
+    if let Some(g) = map.get(val) {
+        return g.clone();
     }
-    builtin_icon(field, val).unwrap_or_else(|| val.to_string())
+    builtin_status_icon(kind, val).unwrap_or_else(|| val.to_string())
 }
 
-fn builtin_icon(field: &str, val: &str) -> Option<String> {
-    let s = match field {
-        "status" => match val {
-            "pending" => "○",
-            "in-progress" => "●",
-            "completed" => "✓",
-            "cancelled" => "✕",
-            _ => return None,
-        },
-        "type" => match val {
-            "todo" => "󰄰",
-            "event" => "󰃭",
-            _ => return None,
-        },
+/// Type column icon (kept for user-defined `field = "type"` columns).
+fn icon_type(c: &Column, ty: &str) -> String {
+    if let Some(g) = c.icons.get(ty) {
+        return g.clone();
+    }
+    builtin_type_icon(ty).unwrap_or_else(|| ty.to_string())
+}
+
+/// Default status glyph. Events are calendar items: any non-cancelled status
+/// renders the calendar glyph; only `cancelled` is distinct.
+fn builtin_status_icon(kind: &str, val: &str) -> Option<String> {
+    if kind == "event" {
+        return Some(if val == "cancelled" { "✕" } else { "󰃭" }.to_string());
+    }
+    let s = match val {
+        "pending" => "○",
+        "in-progress" => "●",
+        "completed" => "✓",
+        "cancelled" => "✕",
+        _ => return None,
+    };
+    Some(s.to_string())
+}
+
+fn builtin_type_icon(val: &str) -> Option<String> {
+    let s = match val {
+        "todo" => "󰄰",
+        "event" => "󰃭",
         _ => return None,
     };
     Some(s.to_string())
@@ -565,10 +598,10 @@ fn colorize(conf: &Config, parents: &HashSet<&str>, r: &Row, line: &str) -> Stri
             continue;
         }
         for (key, spec) in &theme.colors {
-            if key == token || (token == "uda." && key.starts_with("uda.")) {
-                if rule_matches(key, parents, r) {
-                    return wrap_style(&parse_style(spec), line);
-                }
+            if (key == token || (token == "uda." && key.starts_with("uda.")))
+                && rule_matches(key, parents, r)
+            {
+                return wrap_style(&parse_style(spec), line);
             }
         }
     }
@@ -585,8 +618,8 @@ fn rule_matches(key: &str, parents: &HashSet<&str>, r: &Row) -> bool {
     match key {
         "deleted" => false, // calman hard-deletes; no deleted state
         "completed" => t.status == TaskStatus::Completed,
-        "active" => t.status == TaskStatus::InProgress,
-        "overdue" => t.due.is_some_and(|d| d < Utc::now()) && !t.status.is_done(),
+        "active" => t.status.is_active(),
+        "overdue" => crate::filter::task_date(t).is_some_and(|d| d < Utc::now()) && !t.status.is_done(),
         "due.today" => t
             .due
             .is_some_and(|d| d.with_timezone(&Local).date_naive() == Local::now().date_naive()),
@@ -766,15 +799,17 @@ mod tests {
 
     #[test]
     fn theme_colorizes_row_by_precedence() {
-        let mut conf = Config::default();
-        conf.theme = Some(crate::config::ThemeCfg {
-            name: Some("t".into()),
-            precedence: Some("completed,overdue".into()),
-            colors: HashMap::from([
-                ("completed".to_string(), "gray10 on gray2".to_string()),
-                ("overdue".to_string(), "inverse".to_string()),
-            ]),
-        });
+        let conf = Config {
+            theme: Some(crate::config::ThemeCfg {
+                name: Some("t".into()),
+                precedence: Some("completed,overdue".into()),
+                colors: HashMap::from([
+                    ("completed".to_string(), "gray10 on gray2".to_string()),
+                    ("overdue".to_string(), "inverse".to_string()),
+                ]),
+            }),
+            ..Config::default()
+        };
         let mut t = crate::model::Task::new("work", "done");
         t.status = crate::model::TaskStatus::Completed;
         let r = Row {
@@ -834,7 +869,7 @@ mod tests {
     }
 
     #[test]
-    fn event_renders_calendar_in_status_and_todo_relative_in_date() {
+    fn event_uses_status_glyph_and_todo_relative_in_date() {
         let conf = Config::default();
         let report = Report::resolve("next", &conf);
         let mut ev = crate::model::Task::new("work", "meet");
@@ -845,8 +880,34 @@ mod tests {
             task: ev,
         };
         let cells: Vec<String> = report.columns.iter().map(|c| cell(&conf, &r, c)).collect();
-        // status col → event calendar glyph (nerdfont), date col → plain MM/DD
+        // status col → event calendar glyph (built-in default for events),
+        // date col → plain MM/DD
         assert_eq!(cells[1], "󰃭");
         assert_eq!(cells[2].len(), 5); // MM/DD
+    }
+
+    #[test]
+    fn per_kind_icon_tables_apply() {
+        let mut conf = Config::default();
+        conf.icons.todo.insert("pending".into(), "T".into());
+        conf.icons.event.insert("pending".into(), "E".into());
+        let report = Report::resolve("next", &conf);
+        let mut ev = crate::model::Task::new("work", "meet");
+        ev.dtstart = Some(chrono::Utc::now() + chrono::Duration::days(1));
+        let r = Row {
+            id: 1,
+            source: "work".into(),
+            task: ev,
+        };
+        let ev_cells: Vec<String> = report.columns.iter().map(|c| cell(&conf, &r, c)).collect();
+        assert_eq!(ev_cells[1], "E");
+
+        let t = Row {
+            id: 2,
+            source: "work".into(),
+            task: crate::model::Task::new("work", "chore"),
+        };
+        let t_cells: Vec<String> = report.columns.iter().map(|c| cell(&conf, &t, c)).collect();
+        assert_eq!(t_cells[1], "T");
     }
 }

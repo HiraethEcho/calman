@@ -151,7 +151,14 @@ pub fn render_ics(task: &Task) -> Result<String> {
     props.push(format!("CREATED:{}", dt(task.created_at)));
     props.push(format!("LAST-MODIFIED:{}", dt(task.updated_at)));
     if let Some(d) = task.due {
-        props.push(format!("DUE:{}", dt(d)));
+        if task.allday {
+            props.push(format!(
+                "DUE;VALUE=DATE:{}",
+                d.with_timezone(&Local).format("%Y%m%d")
+            ));
+        } else {
+            props.push(format!("DUE:{}", dt(d)));
+        }
     }
     if let Some(p) = task.percent_complete {
         props.push(format!("PERCENT-COMPLETE:{p}"));
@@ -247,6 +254,10 @@ pub fn parse_ics(content: &str) -> Result<Task> {
             "STATUS" => status = status_from_ics(value),
             "PRIORITY" => priority = value.parse().ok(),
             "CATEGORIES" => tags = value.split(',').map(unescape_text).collect(),
+            "DUE" if name.contains("VALUE=DATE") => {
+                allday = true;
+                due = parse_all_day(value);
+            }
             "DUE" => {
                 due = match &tzid {
                     Some(tz) => parse_tz(value, tz),

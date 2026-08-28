@@ -11,7 +11,10 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
     let sources = resolve_sources(conf, override_, ContextKind::Cli)?;
     let rows = crate::cli::load_merged(&sources)?;
     let filter = parse_expr(&q.filter_tokens)?;
-    let n = rows.iter().filter(|r| filter.matches(&r.task)).count();
+    let n = rows
+        .iter()
+        .filter(|r| filter.matches_with(&r.task, conf.date.due_date_overdue_today))
+        .count();
     println!("{n}");
     Ok(())
 }

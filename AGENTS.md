@@ -37,7 +37,8 @@ calman/
 │   ├── sync/
 │   │   └── executor.rs # run pre_hook/cmd/post_hook, lock management
 │   ├── date_parser.rs  # natural‑language date parsing
-│   ├── filter.rs       # filter logic for list/count
+│   ├── filter.rs       # shared filter expression engine (CLI + report filter)
+│   ├── recurrence.rs   # `recur:`/`repeat:` → RFC 5545 RRULE normalizer
 │   ├── id_manager.rs   # short‑ID resolution
 │   ├── cli/
 │   │   ├── mod.rs      # subcommand handlers
@@ -100,14 +101,15 @@ calman/
 - Ensure atomic writes and correct `.calman-state.json` handling.
 
 ## 10. Current Development Phase (from PLAN.md)
-We are in **Phase 1: Core Engine & CLI Foundation**. Priority tasks:
-- [ ] Configuration loader (`config.rs`)
-- [ ] Data model (`model.rs`)
-- [ ] JSONL storage (`storage/jsonl.rs`) – atomic writes
-- [ ] ICS storage (`storage/ics.rs`) – basic read/write
-- [ ] Sync executor (`sync/executor.rs`) – run pre_hook/cmd/post_hook
-- [ ] CLI commands: `add`, `list`, `done`, `delete`, `modify`, `count`, `sync`, `tui` (stub)
-- [ ] Date parser (basic, extendable)
+We are in **Phase 2: CLI Advanced Features** (CLI is stable; TUI is Phase 3).
+Phase 1 core engine + storage + sync are complete. Priority tasks done:
+- [x] Config loader, data model, JSONL/ICS storage, sync executor
+- [x] CLI: add/list/done/delete/modify/count/sync
+- [x] Date parser (custom, not pest/nom)
+- [x] Shared filter grammar (CLI + report `filter`): and/or/parens, type/source/due/status/virtual tags
+- [x] Report engine: builtin ls/list/next, merged STATUS column, DATE column, rc overrides, nerdfont icons
+- [x] Recurrence (`recur:` → RRULE), date-only all-day due, relations
+- [x] Config two tiers (`*.default.toml` / `*.example.toml`), `calman help` cheat-sheet
 
 TUI is **Phase 3** – do not start on it until CLI is stable.
 

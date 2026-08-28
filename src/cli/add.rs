@@ -11,8 +11,9 @@ use crate::date_parser::{
     DateValue, local_midnight, parse_date_value, parse_duration, resolve_end,
 };
 use crate::model::Task;
+use crate::source::resolve_source_name;
 use crate::storage::Storage;
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use chrono::Local;
 
 pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
@@ -26,16 +27,29 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         Some(_) => bail!("`add` accepts exactly one source (e.g. source:work)"),
         None => conf.write_source().to_string(),
     };
-    let src = conf
-        .source(&single)
-        .ok_or_else(|| anyhow::anyhow!("unknown write source `{single}`"))?;
+    // Resolve through `resolve_source_name` so `IcsDir` collection refs
+    // (e.g. `remote/sorge`) map to a concrete virtual source.
+    let resolved = resolve_source_name(&conf.sources, &single)
+        .with_context(|| format!("resolve source `{single}`"))?;
+    let src = match resolved.len() {
+        1 => resolved.into_iter().next().unwrap(),
+        0 => bail!("unknown write source `{single}`"),
+        _ => bail!(
+            "`add` to an IcsDir source needs a specific collection, e.g. source:{}/<collection>",
+            single
+        ),
+    };
 
     let mut task = Task::new(&src.name, q.text.clone());
     task.priority = q.priority;
     task.tags = q.tags.clone();
     task.description = q.description.clone();
     task.location = q.location.clone();
-    task.rrule = q.repeat.clone();
+    task.rrule = q
+        .repeat
+        .as_deref()
+        .map(crate::recurrence::normalize_recurrence)
+        .transpose()?;
     if let Some(rel) = &q.rel {
         let targets = crate::cli::resolve_targets(conf, None, std::slice::from_ref(rel))?;
         task.related_to = targets.first().map(|(uid, _)| uid.clone());
@@ -88,6 +102,8 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         }
         if let Some(d) = &q.due {
             task.due = Some(*d);
+            // Date-only `due` → all-day todo (ICS DUE;VALUE=DATE).
+            task.allday = task.allday || q.due_allday;
         }
     }
 
@@ -100,7 +116,7 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         task.alarm_before = Some(secs);
     }
 
-    let mut st = open_storage(src)?;
+    let mut st = open_storage(&src)?;
     st.add(task)?;
     if q.start.is_some() {
         println!("added event to `{single}`");

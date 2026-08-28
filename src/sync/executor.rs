@@ -46,9 +46,11 @@ pub fn run_sync(location: &Path, name: &str, sync: &SyncConfig) -> Result<()> {
 }
 
 fn run_command(location: &Path, name: &str, label: &str, cmd: &str) -> Result<()> {
+    // Quote substitutions so paths/names with shell metacharacters or spaces
+    // are passed verbatim rather than re-parsed by the shell.
     let expanded = cmd
-        .replace("{location}", &location.display().to_string())
-        .replace("{name}", name);
+        .replace("{location}", &shell_quote(&location.display().to_string()))
+        .replace("{name}", &shell_quote(name));
     let status = Command::new("sh")
         .arg("-c")
         .arg(&expanded)
@@ -59,6 +61,12 @@ fn run_command(location: &Path, name: &str, label: &str, cmd: &str) -> Result<()
         bail!("`{label}` exited with status {status}");
     }
     Ok(())
+}
+
+/// Wrap a string in single quotes for safe shell interpolation, escaping any
+/// embedded single quotes via the `'\''` idiom.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 #[cfg(test)]

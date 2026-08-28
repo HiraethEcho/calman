@@ -22,7 +22,10 @@ pub fn run(conf: &Config, q: &ParsedArgs, report_name: &str) -> Result<()> {
 
     let mut selected: Vec<&Row> = rows
         .iter()
-        .filter(|r| cli_filter.matches(&r.task) && report_filter.matches(&r.task))
+        .filter(|r| {
+            cli_filter.matches_with(&r.task, conf.date.due_date_overdue_today)
+                && report_filter.matches_with(&r.task, conf.date.due_date_overdue_today)
+        })
         .collect();
     report::sort_rows(&mut selected, &report.sort);
     print!("{}", report::render(conf, &report, &selected));

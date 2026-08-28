@@ -1,0 +1,79 @@
+# ============================================================================
+# calman — DEFAULT CONFIGURATION (config.default.toml)
+#
+# This file is the COMPLETE default configuration. It mirrors `Config::default()`
+# exactly: if no `~/.config/calman/config.toml` exists, calman behaves as if this
+# file were loaded. Copy it as your `config.toml` to start from known defaults,
+# then override only the keys you need.
+#
+# Everything below is optional — omit any section to accept its default.
+# ============================================================================
+
+# ------------------------------------------------------------------- [defaults]
+[defaults]
+# Default source that `add` writes to.
+write_source = "work"
+# Report run by bare `calman` (unset → "next").
+# default_report = "next"
+
+# ------------------------------------------------------------------- [contexts]
+# Per-context source lists. Empty = all sources.
+[contexts]
+cli = []
+sync = []
+tui = []
+
+# ----------------------------------------------------------------------- [date]
+[date]
+# End of the working week (used by `eoww`). Reserved; not yet applied.
+workweek_end = "17:00"
+# First day of the week (used by `sow`/`eow`). Reserved; not yet applied.
+week_start = "monday"
+# Time used when a date-only `start:` needs an hour (e.g. "09:00").
+default_start_time = "09:00"
+# Default event length when neither `end:` nor `duration:` is given.
+default_event_duration = "1h"
+# For a date-only `due` (all-day todo): count as overdue starting on its own
+# day (`true`) or only after the day passes (`false`, default).
+due_date_overdue_today = false
+
+# -------------------------------------------------------------------------- [ui]
+[ui]
+# Theme name (Phase-3 TUI). Empty = no theme.
+theme = ""
+# Vim-style keybindings (Phase-3 TUI).
+vim_keys = false
+# TUI default filter: "todo" | "event" | "all" (Phase-3 TUI).
+default_filter = ""
+
+# ---------------------------------------------------------------------- [locale]
+[locale]
+# UI language: "en" | "zh-CN".
+language = "en"
+
+# ---------------------------------------------------------------------- [icons]
+# Per-kind nerdfont overrides. Empty → builtin defaults
+# (todo: ○ ● ✓ ✕ ; event: calendar glyph, cancelled ✕).
+[icons]
+[icons.todo]
+[icons.event]
+
+# ---------------------------------------------------------------------- [theme]
+# Row-level colors (taskwarrior custom.theme format). Optional; omit for none.
+# [theme]
+# name = "dark"
+# "rule.precedence.color" = "completed,active,overdue,due.today,due,uda.,blocked,blocking,scheduled,tagged"
+# [theme.color]
+# completed = "gray10 on gray2"
+# overdue = "inverse"
+
+# ------------------------------------------------------------------- [report.*]
+# Built-in reports (ls/list/next) are hardcoded; override here if desired.
+# (See report.example.toml for the full schema.)
+
+# ---------------------------------------------------------------------- [source]
+# Default data source created when none is configured.
+[[source]]
+name = "work"
+type = "jsonl"
+location = "~/.local/share/calman/work/"

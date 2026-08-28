@@ -27,6 +27,86 @@ pub struct Row {
     pub task: Task,
 }
 
+/// Filter cheat-sheet printed by `calman help` / `calman filters`.
+pub fn print_filter_help() {
+    print!(
+        r#"calman — task & event manager (CLI)
+
+COMMANDS
+  calman add <text> [opts]        add todo (due:) or event (start:)
+  calman list|ls|next [filter]   run a report (bare `calman` → next)
+  calman done <id>               mark completed
+  calman delete <id>             hard delete
+  calman modify <id> [opts]      change fields
+  calman count [filter]          print number of matches
+  calman sync [source]           run external sync command
+  calman help | filters          show this cheat-sheet
+
+COMMON OPTIONS (add / modify)
+  due:<date>        todo deadline (date-only → all-day todo)
+  start:<date>      event start (date-only → all-day event)
+  end:<date> duration:<dur>  event end
+  pri:H|M|L         priority (9/5/1)
+  +tag -tag         tags
+  source:<name>     write/list source (ics-dir: `name/collection`)
+  rel:<id>          parent relation (RELATED-TO)
+  recur:<rule>      recurrence (alias `repeat:`)
+  location:<text> alert:<lead> desc:<text>
+
+RECURRENCE (recur: / repeat:)  → standard RFC 5545 RRULE
+  raw passthrough : recur:FREQ=WEEKLY;BYDAY=TU,FR;UNTIL=20260925
+  frequency        : daily weekly monthly yearly
+  interval         : every 7d | 7d | every 2 weeks   (→ INTERVAL)
+  weekdays         : every tuesday and friday | every weekend (→ BYDAY)
+  end              : for 5 times | for 7 weeks (weeks×weekday→COUNT)
+                     | count:5 | until:20260925 | until:eoy | until:eom
+  e.g. every tuesday and friday for 7 weeks
+       → FREQ=WEEKLY;BYDAY=TU,FR;COUNT=14
+
+DATE-ONLY DUE (config-driven overdue)
+  [date] due_date_overdue_today = false (default): overdue only after the day
+  [date] due_date_overdue_today = true : overdue from the due day itself
+  stored as DUE;VALUE=DATE in ICS (iOS Reminders compatible)
+
+FILTER GRAMMAR (shared by CLI args and report `filter`)
+  type:todo | type:event | type:all        (+TODO / +EVENT aliases)
+  source:work  -source:work                include / exclude a source
+  due:<day> exact | due.before:<   strict < | due.by:<   <= | due.after:>=
+  status:pending|in-progress|completed|cancelled|active
+  +OVERDUE +PENDING +COMPLETED +CANCELLED +IN-PROCESS +TAGGED +UNTAGGED +SCHEDULED
+  +tag / -tag
+  Composition: adjacent atoms = and; `and` binds tighter than `or`:
+    A B or C D     = (A and B) or (C and D)
+    (A or B) C     = (A or B) and C
+
+SEPARATE EVENT / TODO
+  calman type:event             future events only (report default still applies)
+  calman type:todo +PENDING     active todos
+  calman rc.report.next.filter='type:event' next   all events incl. past
+
+REPORTS & OVERRIDES (Taskwarrior rc style)
+  builtin: ls / list / next (bare `calman` → next)
+  rc.report.<name>.columns=id,date,summary   custom columns (script-friendly)
+  rc.report.<name>.labels=ID,DATE,TASK
+  rc.report.<name>.filter=...  rc.report.<name>.sort=...
+
+ICONS (nerdfont) — 3-level fallback: column `icons` > [icons.todo]/[icons.event] > builtin
+  [icons.todo]   pending=○ in-progress=● completed=✓ cancelled=✕
+  [icons.event]  pending=󰃭 (calendar; cancelled=✕)   event non-cancelled → calendar
+
+SOURCES
+  jsonl / ics / ics-dir (Radicale/vdirsync). ics-dir collections:
+    source:remote           → expands all collections
+    source:remote/sorge      → one collection (composite reference)
+
+CONFIG (two tiers)
+  config.default.toml  complete default reference — self-contained; lists every default option (what calman uses with no config file)
+  config.example.toml  annotated custom sample (copy & edit)
+  include = ["config.default.toml", "report.default.toml", "theme.default.toml"]
+"#
+    );
+}
+
 /// Open the storage backend for a source.
 pub fn open_storage(src: &Source) -> Result<Store> {
     let loc = src.abs_location();
@@ -179,7 +259,7 @@ mod tests {
         let mut st = crate::storage::jsonl::JsonlStorage::open(dir.path()).unwrap();
         for (i, sum) in ["a", "b", "c"].iter().enumerate() {
             let mut t = Task::new("work", *sum);
-            t.created_at = t.created_at + chrono::Duration::hours(i as i64);
+            t.created_at += chrono::Duration::hours(i as i64);
             st.add(t).unwrap();
         }
         // complete the middle task

@@ -89,6 +89,7 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
                     text: q.text.clone(),
                     priority: q.priority,
                     due: q.due,
+                    due_allday: q.due_allday,
                     status: q.status,
                     tags: q.tags.clone(),
                     anti_tags: q.anti_tags.clone(),
@@ -115,6 +116,7 @@ struct Upd {
     text: String,
     priority: Option<u8>,
     due: Option<DateTime<Utc>>,
+    due_allday: bool,
     status: Option<TaskStatus>,
     tags: Vec<String>,
     anti_tags: Vec<String>,
@@ -139,6 +141,9 @@ fn apply(t: &mut Task, u: &Upd) -> Result<()> {
     }
     if let Some(d) = u.due {
         t.due = Some(d);
+        if !t.is_event() {
+            t.allday = u.due_allday;
+        }
     }
     if let Some(s) = u.status {
         t.status = s;
@@ -158,7 +163,7 @@ fn apply(t: &mut Task, u: &Upd) -> Result<()> {
         t.location = Some(v.clone());
     }
     if let Some(v) = &u.repeat {
-        t.rrule = Some(v.clone());
+        t.rrule = Some(crate::recurrence::normalize_recurrence(v)?);
     }
     if let Some(v) = &u.description {
         t.description = Some(v.clone());

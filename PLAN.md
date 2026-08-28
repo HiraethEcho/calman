@@ -38,12 +38,10 @@
 **Goal**: Polish the CLI to match Taskwarrior’s usability.
 
 ### 2.1 Date Parsing Engine
-- [ ] Define grammar using `pest` or `nom`.
-- [ ] Implement `DateParser`:
-    - Handle `eow`, `eoww`, `eond`, etc.
-    - Handle offsets (`+3d`).
-    - Handle weekdays (`fri+1`).
-    - Integrate `chrono` for UTC conversion.
+- [x] Natural-language date parser (`date_parser.rs`, custom — not pest/nom):
+  - `eow`, `eoww`, `eond`, `sod`, `sow`, `som`, `soy`, … day boundaries.
+  - Offsets (`+3d`, `-2w`), weekdays (`fri+1`), ISO/compact dates, `HH:MM`.
+  - Date-only forms land at local midnight (all-day semantics).
 
 ### 2.2 Filter Engine
 - [x] Parse command‑line arguments for `list` and `count`.
@@ -53,7 +51,8 @@
 
 ### 2.3 Integration Tests & CLI Documentation
 - [x] Write integration tests (`tests/`) covering core commands.
-- [ ] Polish `--help` output.
+- [x] `calman help` / `calman filters` cheat-sheet (full syntax).
+- [x] `README.md` with quick start, config tiers, recurrence, filters, reports.
 
 ### 2.4 Report Engine & Relations
 - [x] Config schema: `[report.<name>]` (columns/format/sort/filter), `[defaults] default_report`.
@@ -62,12 +61,15 @@
 - [x] Builtin default filters: future events only (dtstart ≥ sod), todos unchanged.
 - [x] Merged STATUS column (event → calendar icon); DATE column + per-column `event_format`/`todo_format`.
 - [x] CLI rc overrides: `rc.report.<name>.columns=/labels=/filter=/sort=`.
-- [x] Nerdfont icons, 3-level fallback (column `icons` > `[icons]` global > builtin).
+- [x] Nerdfont icons, 3-level fallback (column `icons` > `[icons.todo]`/`[icons.event]` > builtin).
 - [x] Global row-level color rules `[[color]]`, first-match, `fg/bg/bold/underline/italic/dim`.
 - [x] Builtin virtual tags: `OVERDUE`, `DONE`≡`COMPLETED`, `CANCELLED`, `IN-PROCESS`, `TAGGED`/`UNTAGGED`, `TODO`/`EVENT`, `SCHEDULED`.
 - [x] `rel:<parent-id>` attribute on `add`/`modify` → `RELATED-TO` (`RELTYPE=PARENT`).
 - [x] `RELATED-TO` read/write in `IcsStorage`; `related_to` persisted in JSONL.
 - [x] Modular config: `include` merge in `config.rs` + `config.example.toml` / `report.example.toml` / `theme.example.toml`.
+- [x] Config two tiers: `*.default.toml` (minimal baseline) + `*.example.toml` (annotated samples).
+- [x] Recurrence: `recur:`/`repeat:` → standard RFC 5545 `RRULE` (`recurrence.rs`); raw `FREQ=` passthrough + friendly grammar.
+- [x] Date-only `due`/`start` → all-day (`VALUE=DATE`); `[date] due_date_overdue_today` toggle.
 
 ---
 

@@ -7,8 +7,8 @@ mod cli;
 mod config;
 mod date_parser;
 mod filter;
-mod id_manager;
 mod model;
+mod recurrence;
 mod report;
 mod source;
 mod storage;
@@ -60,6 +60,10 @@ fn run() -> anyhow::Result<()> {
         Some(Command::Modify) => cli::modify::run(&conf, &q),
         Some(Command::Count) => cli::count::run(&conf, &q),
         Some(Command::Sync) => cli::sync::run(&conf, &q),
+        Some(Command::Help) => {
+            cli::print_filter_help();
+            Ok(())
+        }
         #[cfg(feature = "tui")]
         Some(Command::Tui) => cli::tui::run(),
         #[cfg(not(feature = "tui"))]
