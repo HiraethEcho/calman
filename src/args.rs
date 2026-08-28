@@ -31,7 +31,16 @@ pub enum DueMod {
     #[default]
     On,
     Before,
+    By,
     After,
+}
+
+/// A Taskwarrior-style `rc.report.<name>.<key>=<value>` override from argv.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RcReport {
+    pub name: String,
+    pub key: String,
+    pub value: String,
 }
 
 /// Fully parsed command line.
@@ -53,13 +62,13 @@ pub struct ParsedArgs {
     pub pending: bool,
     pub completed: bool,
     pub active: bool,
-    pub done: bool,
     pub cancelled: bool,
     pub in_progress: bool,
     pub tagged: bool,
     pub untagged: bool,
     pub scheduled: bool,
     pub r#type: Option<String>,
+    pub anti_source: Option<String>,
     pub rel: Option<String>,
     pub anti_pending: bool,
     pub anti_active: bool,
@@ -71,6 +80,10 @@ pub struct ParsedArgs {
     pub anti_untagged: bool,
     pub anti_scheduled: bool,
     pub anti_type: Option<String>,
+    /// `rc.report.<name>.<key>=<value>` tokens (e.g. columns/labels).
+    pub rc_reports: Vec<RcReport>,
+    /// Raw filter tokens (post-command, non-rc, non-id) for list/count.
+    pub filter_tokens: Vec<String>,
     pub start: Option<String>,
     pub end: Option<String>,
     pub location: Option<String>,
@@ -113,10 +126,24 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
             continue;
         }
 
+        // Global TW rc knobs (e.g. rc.verbose=header) are accepted and ignored.
+        if lower.starts_with("rc.") && !lower.starts_with("rc.report.") {
+            ids_exhausted = true;
+            continue;
+        }
+
+        if let Some(rc) = parse_rc(tok)? {
+            q.rc_reports.push(rc);
+            ids_exhausted = true;
+            continue;
+        }
+
         if !ids_exhausted && tok.parse::<usize>().is_ok() {
             q.ids.push(tok.clone());
             continue;
         }
+
+        q.filter_tokens.push(tok.clone());
 
         if let Some(rest) = lower
             .strip_prefix("priority:")
@@ -126,9 +153,14 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
         } else if tok.len() > 7 && tok[..7].eq_ignore_ascii_case("source:") {
             q.sources
                 .extend(tok[7..].split(',').map(|s| s.trim().to_string()));
+        } else if tok.len() > 8 && tok[..8].eq_ignore_ascii_case("-source:") {
+            q.anti_source = Some(tok[8..].to_string());
         } else if let Some(rest) = lower.strip_prefix("due.before:") {
             q.due = Some(parse_datetime(rest)?);
             q.due_mod = DueMod::Before;
+        } else if let Some(rest) = lower.strip_prefix("due.by:") {
+            q.due = Some(parse_datetime(rest)?);
+            q.due_mod = DueMod::By;
         } else if let Some(rest) = lower.strip_prefix("due.after:") {
             q.due = Some(parse_datetime(rest)?);
             q.due_mod = DueMod::After;
@@ -170,7 +202,9 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
                 "+completed" | "+done" => q.completed = true,
                 "+active" => q.active = true,
                 "+cancelled" | "+canceled" => q.cancelled = true,
-                "+in-progress" | "+inprogress" | "+in-process" | "+inprocess" | "+started" => q.in_progress = true,
+                "+in-progress" | "+inprogress" | "+in-process" | "+inprocess" | "+started" => {
+                    q.in_progress = true
+                }
                 "+tagged" => q.tagged = true,
                 "+untagged" => q.untagged = true,
                 "+scheduled" => q.scheduled = true,
@@ -205,6 +239,27 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
     Ok(q)
 }
 
+fn parse_rc(tok: &str) -> Result<Option<RcReport>> {
+    if !tok.to_ascii_lowercase().starts_with("rc.report.") {
+        return Ok(None);
+    }
+    let rest = &tok["rc.report.".len()..];
+    let (name_key, value) = rest.split_once('=').ok_or_else(|| {
+        anyhow::anyhow!("bad rc override `{tok}` (expected rc.report.<name>.<key>=<value>)")
+    })?;
+    let (name, key) = name_key.split_once('.').ok_or_else(|| {
+        anyhow::anyhow!("bad rc override `{tok}` (expected rc.report.<name>.<key>=<value>)")
+    })?;
+    if name.is_empty() || key.is_empty() {
+        anyhow::bail!("bad rc override `{tok}`");
+    }
+    Ok(Some(RcReport {
+        name: name.to_string(),
+        key: key.to_ascii_lowercase(),
+        value: value.to_string(),
+    }))
+}
+
 fn command_word(tok: &str) -> Option<(Command, Option<String>)> {
     let (cmd, report) = match tok.to_ascii_lowercase().as_str() {
         "add" => (Command::Add, None),
@@ -229,7 +284,9 @@ fn parse_priority(v: &str) -> Result<u8> {
 fn parse_status(v: &str) -> Result<TaskStatus> {
     Ok(match v.to_ascii_lowercase().as_str() {
         "pending" => TaskStatus::Pending,
-        "in-progress" | "inprogress" | "in-process" | "inprocess" | "started" => TaskStatus::InProgress,
+        "in-progress" | "inprogress" | "in-process" | "inprocess" | "started" => {
+            TaskStatus::InProgress
+        }
         "completed" | "done" => TaskStatus::Completed,
         "cancelled" | "canceled" => TaskStatus::Cancelled,
         _ => bail!("unknown status `{v}`"),
@@ -352,5 +409,44 @@ mod tests {
         let q = p(&["count", "status:completed"]);
         assert_eq!(q.cmd, Some(Command::Count));
         assert_eq!(q.status, Some(TaskStatus::Completed));
+    }
+
+    #[test]
+    fn rc_report_override_parsed() {
+        let q = p(&[
+            "rc.report.next.columns=id,summary",
+            "rc.report.next.labels=ID,SUMMARY",
+            "next",
+        ]);
+        assert_eq!(q.cmd, Some(Command::List));
+        assert_eq!(q.report_name.as_deref(), Some("next"));
+        assert_eq!(q.rc_reports.len(), 2);
+        assert_eq!(q.rc_reports[0].name, "next");
+        assert_eq!(q.rc_reports[0].key, "columns");
+        assert_eq!(q.rc_reports[0].value, "id,summary");
+    }
+
+    #[test]
+    fn filter_tokens_exclude_command_rc_ids() {
+        let q = p(&[
+            "rc.report.next.columns=id",
+            "+PENDING",
+            "source:work",
+            "-source:personal",
+            "list",
+        ]);
+        assert_eq!(
+            q.filter_tokens,
+            vec!["+PENDING", "source:work", "-source:personal"]
+        );
+        assert_eq!(q.anti_source.as_deref(), Some("personal"));
+    }
+
+    #[test]
+    fn global_rc_tokens_ignored() {
+        let q = p(&["rc.verbose=header", "next", "rc.report.next.columns=id"]);
+        assert_eq!(q.cmd, Some(Command::List));
+        assert_eq!(q.filter_tokens, Vec::<String>::new());
+        assert_eq!(q.rc_reports.len(), 1);
     }
 }

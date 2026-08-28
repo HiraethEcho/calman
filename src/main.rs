@@ -51,11 +51,9 @@ fn run() -> anyhow::Result<()> {
             &q,
             conf.defaults.default_report.as_deref().unwrap_or("next"),
         ),
-        Some(Command::List) => cli::list::run(
-            &conf,
-            &q,
-            q.report_name.as_deref().unwrap_or("list"),
-        ),
+        Some(Command::List) => {
+            cli::list::run(&conf, &q, q.report_name.as_deref().unwrap_or("list"))
+        }
         Some(Command::Add) => cli::add::run(&conf, &q),
         Some(Command::Done) => cli::done::run(&conf, &q),
         Some(Command::Delete) => cli::delete::run(&conf, &q),

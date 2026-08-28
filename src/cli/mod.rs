@@ -157,7 +157,7 @@ mod tests {
     fn ids_assigned_oldest_first() {
         let dir = tempdir().unwrap();
         let mut st = crate::storage::jsonl::JsonlStorage::open(dir.path()).unwrap();
-        let mut first = Task::new("work", "newer");
+        let first = Task::new("work", "newer");
         let mut second = Task::new("work", "older");
         // older created earlier: rewind its timestamp manually
         second.created_at = first.created_at - chrono::Duration::days(1);
@@ -194,11 +194,12 @@ mod tests {
 
         let rows = load_merged(&[source(dir.path(), "work")]).unwrap();
         // actives = a (1), c (3); completed b keeps id 2 in the full index
-        let f = crate::filter::Filter::from_parsed(&crate::args::parse(&[
-            "status:active".to_string(),
-        ])
-        .unwrap());
-        let shown: Vec<usize> = rows.iter().filter(|r| f.matches(&r.task)).map(|r| r.id).collect();
+        let f = crate::filter::parse_expr(&["status:active".to_string()]).unwrap();
+        let shown: Vec<usize> = rows
+            .iter()
+            .filter(|r| f.matches(&r.task))
+            .map(|r| r.id)
+            .collect();
         assert_eq!(shown, vec![1, 3]);
     }
 }

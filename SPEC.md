@@ -40,7 +40,10 @@ It follows the Unix philosophy: **do one thing and do it well** — provide a fi
 - **CLI habits** follow taskwarrior; **internal semantics** follow CalDAV/iCalendar (RFC 5545).
 - **Reports**: `ls`/`list`/`next`, configured in `config.toml` under `[report.<name>]`; bare `calman` → `[defaults] default_report` (default `next`).
 - **Report schema**: `columns[]` (field, label, width, format, icon), `sort` (`key+`/`key-`, trailing `/` break), `filter`.
-- **Fields**: `id, status, summary, desc, tags, due, pri, type, source`. `summary` = CalDAV `SUMMARY`, `desc` = `DESCRIPTION` (two separate fields).
+- **Report defaults**: builtin reports show only future events (dtstart ≥ start of today); TYPE+STATUS merged into one STATUS column (event → calendar icon); DUE renamed DATE (event plain `MM/DD`, todo relative; per-column `event_format`/`todo_format`).
+- **Fields**: `id, status, summary, desc, tags, due, pri, type, source` (`date` = alias of `due`).
+- **Filter grammar**: one expression language shared by CLI args and report `filter` strings — `and`/`or`/parens, `type:todo|event|all`, `source:`/`-source:`, `due:` exact day, `due.before:` strict `<`, `due.by:` `<=`, `due.after:` `>=`, virtual tags (`+PENDING` etc.); todos use `due`, events use `dtstart`.
+- **CLI report overrides**: Taskwarrior-style `rc.report.<name>.columns=…` / `labels=…` / `filter=…` / `sort=…` for scripted custom reports without editing config. `summary` = CalDAV `SUMMARY`, `desc` = `DESCRIPTION` (two separate fields).
 - **Icons**: nerdfont; fallback column `icons` > global `[icons]` > builtin defaults.
 - **Colors**: taskwarrior-style theme rules in `[theme.color]`, row-level, ordered by `"rule.precedence.color"`; styles `fg [on bg] [bold|underline|italic|dim|inverse]`.
 - **Builtin virtual tags**: `OVERDUE`, `DONE`≡`COMPLETED`, `CANCELLED`, `IN-PROCESS`, `TAGGED`/`UNTAGGED`, `TODO`/`EVENT`, `SCHEDULED` (event = `DTSTART`). No `WAITING`; `DELETED` is local‑only.

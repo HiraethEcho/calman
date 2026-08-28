@@ -80,9 +80,16 @@ pub struct ColumnCfg {
     pub label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<usize>,
-    /// `relative | countdown | iso | truncate`.
+    /// `relative | countdown | iso | truncate | date`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
+    /// Date format for the `date` column when the row is an event (e.g. "%m/%d").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_format: Option<String>,
+    /// Date format for the `date` column when the row is a todo: `relative`,
+    /// `countdown`, `iso`, or a chrono strftime pattern.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub todo_format: Option<String>,
     /// Render a nerdfont glyph instead of text (status/type only).
     #[serde(default)]
     pub icon: bool,
@@ -293,8 +300,8 @@ impl Config {
         }
         let content =
             fs::read_to_string(path).with_context(|| format!("read config {}", path.display()))?;
-        let mut value: toml::Value = toml::from_str(&content)
-            .with_context(|| format!("parse config {}", path.display()))?;
+        let mut value: toml::Value =
+            toml::from_str(&content).with_context(|| format!("parse config {}", path.display()))?;
 
         // Merge `include` files (relative to this config's dir) beneath us:
         // included files fill missing keys; main-file values win.
@@ -583,10 +590,16 @@ overdue = "inverse"
 
         let cfg = Config::load_from(&main).unwrap();
         assert!(cfg.reports.contains_key("next"));
-        assert_eq!(cfg.icons.status.get("pending").map(|s| s.as_str()), Some("○"));
+        assert_eq!(
+            cfg.icons.status.get("pending").map(|s| s.as_str()),
+            Some("○")
+        );
         assert_eq!(cfg.ui.theme, "dark");
         let theme = cfg.theme.unwrap();
         assert_eq!(theme.precedence.as_deref(), Some("completed,overdue"));
-        assert_eq!(theme.colors.get("completed").map(|s| s.as_str()), Some("gray10 on gray2"));
+        assert_eq!(
+            theme.colors.get("completed").map(|s| s.as_str()),
+            Some("gray10 on gray2")
+        );
     }
 }

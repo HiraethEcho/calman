@@ -190,14 +190,25 @@ calman modify <TEXT> [ATTRS...] # bare text replaces the summary
 - **Syntax**: `calman [FILTERS...] [list]`
 - **Data sources**: Uses `contexts.cli` or `source:`-specified sources.
 - **Output**: Table with a dynamic short ID per row (numbered across all selected sources). No `--format` flag.
-- **Filters**:
-    - `due:<date>` / `due.before:<date>` / `due.after:<date>`
-    - `status:<status>`: `pending`, `in‑progress`, `completed`, `cancelled`
+- **Filters**: shared expression grammar with `[report]` `filter` strings.
+    - `and` / `or` / `(` / `)`; implicit `and` between adjacent atoms.
+    - `status:<status>`: `pending`, `in‑progress`, `completed`, `cancelled`, `active`
+    - `type:<type>`: `todo` | `event` | `all`; `+todo`/`+event` aliases
+    - `source:<name>`; `-source:<name>` excludes a source
     - `priority:<level>`: `high`/`h`/`9`, `medium`/`m`/`5`, `low`/`l`/`1`, or 0‑9
+    - `due:<date>`: exact calendar day; `due.before:<date>`: strictly before;
+      `due.by:<date>`: on or before; `due.after:<date>`: on or after
+    - todos compare `due`, events compare `dtstart`
     - `+<tag>`: contains tag; `-<tag>`: excludes tag
     - `+OVERDUE`: overdue and not completed
-    - `+PENDING`: pending or in‑progress
-    - `+COMPLETED`: completed
+    - `+PENDING`: active tasks, events count as pending
+    - `+COMPLETED` / `+CANCELLED` / `+IN-PROCESS` / `+TAGGED` / `+UNTAGGED` / `+SCHEDULED`
+
+CLI custom report overrides (Taskwarrior rc style, script-friendly):
+
+```bash
+calman rc.report.next.columns=id,date,summary rc.report.next.labels=ID,DATE,TASK next
+```
 
 #### C. `done` — Complete a task
 - **Syntax**: `calman done <ID> [ID...]` (or `calman <ID>... done`)

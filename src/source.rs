@@ -203,11 +203,7 @@ mod tests {
 
         // Nested collection
         fs::create_dir_all(root.join("work/projects")).unwrap();
-        fs::write(
-            root.join("work/projects/task1.ics"),
-            "BEGIN:VCALENDAR...",
-        )
-        .unwrap();
+        fs::write(root.join("work/projects/task1.ics"), "BEGIN:VCALENDAR...").unwrap();
 
         // Directory without .ics files (should not be discovered)
         fs::create_dir_all(root.join("empty")).unwrap();

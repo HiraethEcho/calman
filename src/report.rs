@@ -1,12 +1,12 @@
 //! Report engine: config/builtin report definitions, column rendering,
 //! nerdfont icons and global row-level color rules.
 
-use crate::args::parse;
+use crate::args::RcReport;
 use crate::cli::Row;
 use crate::config::{ColumnCfg, Config};
-use crate::filter::Filter;
+use crate::filter::{Expr, parse_expr_str};
 use crate::model::TaskStatus;
-use anyhow::Result;
+use anyhow::{Result, bail};
 use chrono::{DateTime, Local, Utc};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -20,6 +20,8 @@ pub struct Column {
     pub format: Option<String>,
     pub icon: bool,
     pub icons: HashMap<String, String>,
+    pub event_format: Option<String>,
+    pub todo_format: Option<String>,
 }
 
 /// A sort key parsed from `key+` / `key-` / `key+/` (trailing `/` = break).
@@ -55,16 +57,11 @@ impl Report {
     }
 
     /// The report's default filter (parsed to a `Filter`).
-    pub fn filter(&self) -> Result<Filter> {
+    pub fn filter(&self) -> Result<Expr> {
         if self.filter.trim().is_empty() {
-            return Ok(Filter::default());
+            return Ok(Expr::Atom(crate::filter::Filter::default()));
         }
-        let toks: Vec<String> = self
-            .filter
-            .split_whitespace()
-            .map(|s| s.to_string())
-            .collect();
-        Ok(Filter::from_parsed(&parse(&toks)?))
+        parse_expr_str(&self.filter)
     }
 }
 
@@ -77,10 +74,7 @@ fn from_config(cfg: &crate::config::ReportCfg) -> Report {
 }
 
 fn from_column(c: &ColumnCfg) -> Column {
-    let label = c
-        .label
-        .clone()
-        .unwrap_or_else(|| c.field.to_uppercase());
+    let label = c.label.clone().unwrap_or_else(|| c.field.to_uppercase());
     Column {
         field: c.field.clone(),
         label,
@@ -88,7 +82,70 @@ fn from_column(c: &ColumnCfg) -> Column {
         format: c.format.clone(),
         icon: c.icon,
         icons: c.icons.clone(),
+        event_format: c.event_format.clone(),
+        todo_format: c.todo_format.clone(),
     }
+}
+
+/// Apply Taskwarrior-style `rc.report.<name>.<key>=<value>` overrides.
+///
+/// Supported keys: `columns`, `labels`, `filter`, `sort`. `columns` accepts
+/// `field` or `field.format` tokens (comma-separated).
+pub fn apply_rc(report: &mut Report, rcs: &[RcReport], name: &str) -> Result<()> {
+    for rc in rcs {
+        if !rc.name.eq_ignore_ascii_case(name) {
+            continue;
+        }
+        match rc.key.as_str() {
+            "columns" => {
+                let mut cols = Vec::new();
+                for part in rc.value.split(',') {
+                    let part = part.trim();
+                    if part.is_empty() {
+                        continue;
+                    }
+                    let (field, fmt) = match part.split_once('.') {
+                        Some((f, fm)) if !fm.is_empty() => (f, Some(fm)),
+                        _ => (part, None),
+                    };
+                    let mut c = col(field, &field.to_uppercase(), None, None, false);
+                    c.format = fmt.map(|s| s.to_string());
+                    // `date`/`due` columns keep feature defaults unless the
+                    // rc override explicitly sets a format (see `date_col`).
+                    if matches!(c.field.as_str(), "date" | "due") && c.format.is_none() {
+                        c.todo_format = Some("relative".to_string());
+                    }
+                    cols.push(c);
+                }
+                if cols.is_empty() {
+                    bail!("rc.report.{name}.columns is empty");
+                }
+                report.columns = cols;
+            }
+            "labels" => {
+                for (i, label) in rc.value.split(',').enumerate() {
+                    let label = label.trim();
+                    if label.is_empty() {
+                        continue;
+                    }
+                    if i < report.columns.len() {
+                        report.columns[i].label = label.to_string();
+                    }
+                }
+            }
+            "filter" => report.filter = rc.value.clone(),
+            "sort" => {
+                report.sort = rc
+                    .value
+                    .split(',')
+                    .filter(|s| !s.trim().is_empty())
+                    .map(parse_sort)
+                    .collect();
+            }
+            other => bail!("unsupported rc.report key `{other}`"),
+        }
+    }
+    Ok(())
 }
 
 fn parse_sort(s: &str) -> SortKey {
@@ -115,44 +172,61 @@ fn col(field: &str, label: &str, width: Option<usize>, format: Option<&str>, ico
         format: format.map(|s| s.to_string()),
         icon,
         icons: HashMap::new(),
+        event_format: None,
+        todo_format: None,
+    }
+}
+
+fn date_col(label: &str, todo_format: &str) -> Column {
+    Column {
+        field: "date".to_string(),
+        label: label.to_string(),
+        width: None,
+        format: None,
+        icon: false,
+        icons: HashMap::new(),
+        event_format: None,
+        todo_format: Some(todo_format.to_string()),
     }
 }
 
 /// Builtin `ls` / `list` / `next` reports (overridable via config).
+///
+/// Per feature.md `more on report`: only future events are shown by default
+/// (including today), the type/status columns are merged (event = calendar
+/// icon), and DUE is relabelled DATE (event → plain date, todo → relative).
 fn builtin(name: &str) -> Report {
     let (filter, sort, columns) = match name {
         "ls" => (
-            "status:active".to_string(),
+            "type:todo status:active or type:event due.after:sod".to_string(),
             vec!["due+", "created+"],
             vec![
                 col("id", "ID", Some(4), None, false),
-                col("type", "TYPE", None, None, true),
                 col("status", "ST", None, None, true),
-                col("due", "DUE", None, Some("relative"), false),
+                date_col("DATE", "relative"),
                 col("summary", "SUMMARY", None, None, false),
             ],
         ),
         "list" => (
-            "-status:completed -status:cancelled".to_string(),
+            "type:todo -status:completed -status:cancelled or type:event due.after:sod".to_string(),
             vec!["status-", "pri-", "due+"],
             vec![
                 col("id", "ID", Some(4), None, false),
-                col("type", "TYPE", None, None, true),
                 col("status", "STATUS", None, None, true),
                 col("pri", "PRI", None, None, false),
-                col("due", "DUE", None, Some("relative"), false),
+                date_col("DATE", "relative"),
                 col("tags", "TAGS", None, None, false),
                 col("summary", "SUMMARY", None, None, false),
                 col("desc", "DESC", None, None, false),
             ],
         ),
         "next" => (
-            "status:active".to_string(),
+            "type:todo status:active or type:event due.after:sod".to_string(),
             vec!["due+", "pri-"],
             vec![
                 col("id", "ID", Some(4), None, false),
-                col("type", "TYPE", None, None, true),
-                col("due", "DUE", None, Some("countdown"), false),
+                col("status", "ST", None, None, true),
+                date_col("DATE", "relative"),
                 col("summary", "SUMMARY", None, None, false),
             ],
         ),
@@ -194,13 +268,7 @@ pub fn render(conf: &Config, report: &Report, rows: &[&Row]) -> String {
     let mut widths = vec![0usize; ncol];
     let cells: Vec<Vec<String>> = rows
         .iter()
-        .map(|r| {
-            report
-                .columns
-                .iter()
-                .map(|c| cell(conf, r, c))
-                .collect()
-        })
+        .map(|r| report.columns.iter().map(|c| cell(conf, r, c)).collect())
         .collect();
     // UIDs referenced as parents (for the `blocked` color rule).
     let parents: HashSet<&str> = rows
@@ -258,7 +326,16 @@ fn cell(conf: &Config, r: &Row, c: &Column) -> String {
     let t = &r.task;
     match c.field.as_str() {
         "id" => r.id.to_string(),
+        // Merged type/status: events show a calendar glyph, todos show their
+        // status (feature.md `more on report`).
         "status" => {
+            if t.is_event() {
+                return if c.icon {
+                    icon(conf, "type", "event", c)
+                } else {
+                    "event".to_string()
+                };
+            }
             let st = status_txt(t.status);
             if c.icon {
                 icon(conf, "status", st, c)
@@ -277,7 +354,9 @@ fn cell(conf: &Config, r: &Row, c: &Column) -> String {
         "summary" => maybe_truncate(t.summary.as_str(), c),
         "desc" => maybe_truncate(t.description.as_deref().unwrap_or(""), c),
         "tags" => t.tags.join(","),
-        "due" => due_str(conf, r, c),
+        "date" => date_str(r, c),
+        // Backwards-compatible alias: `due` == `date`.
+        "due" => date_str(r, c),
         "pri" => pri_str(t.priority),
         "source" => t.source.clone(),
         _ => String::new(),
@@ -296,20 +375,34 @@ fn maybe_truncate(s: &str, c: &Column) -> String {
     s.to_string()
 }
 
-fn due_str(_conf: &Config, r: &Row, c: &Column) -> String {
-    let dt = if r.task.is_event() {
-        r.task.dtstart
-    } else {
-        r.task.due
-    };
+fn date_str(r: &Row, c: &Column) -> String {
+    let dt = crate::filter::task_date(&r.task);
     let Some(dt) = dt else {
         return String::new();
     };
     let local = dt.with_timezone(&Local);
-    match c.format.as_deref() {
+    if r.task.is_event() {
+        // Event: plain date by default, customisable via `event_format`.
+        return match c.event_format.as_deref() {
+            Some(f) => fmt_date(&local, f),
+            None => local.format("%m/%d").to_string(),
+        };
+    }
+    match c.todo_format.as_deref().or(c.format.as_deref()) {
         Some("relative") => relative(&local, &Local::now()),
         Some("countdown") => countdown(&local, &Local::now()),
-        _ => local.format("%Y-%m-%d").to_string(),
+        Some(f) => fmt_date(&local, f),
+        None => local.format("%Y-%m-%d").to_string(),
+    }
+}
+
+/// Format a date: `iso`/`date` keywords or any chrono strftime pattern.
+fn fmt_date(dt: &DateTime<Local>, spec: &str) -> String {
+    match spec {
+        "iso" => dt.format("%Y-%m-%d").to_string(),
+        "date" => dt.format("%m/%d").to_string(),
+        s if s.contains('%') => dt.format(s).to_string(),
+        s => dt.format(s).to_string(),
     }
 }
 
@@ -415,7 +508,7 @@ fn sort_val(r: &Row, field: &str) -> SVal {
         "id" => SVal::Num(r.id as i64),
         "created" => SVal::Num(t.created_at.timestamp()),
         "updated" => SVal::Num(t.updated_at.timestamp()),
-        "due" => SVal::Num(
+        "due" | "date" => SVal::Num(
             if t.is_event() {
                 t.dtstart.map(|d| d.timestamp())
             } else {
@@ -430,7 +523,11 @@ fn sort_val(r: &Row, field: &str) -> SVal {
             TaskStatus::Completed => 2,
             TaskStatus::Cancelled => 3,
         }),
-        "type" => SVal::Str(if t.is_event() { "event".into() } else { "todo".into() }),
+        "type" => SVal::Str(if t.is_event() {
+            "event".into()
+        } else {
+            "todo".into()
+        }),
         "summary" => SVal::Str(t.summary.to_lowercase()),
         _ => SVal::Str(String::new()),
     }
@@ -490,9 +587,9 @@ fn rule_matches(key: &str, parents: &HashSet<&str>, r: &Row) -> bool {
         "completed" => t.status == TaskStatus::Completed,
         "active" => t.status == TaskStatus::InProgress,
         "overdue" => t.due.is_some_and(|d| d < Utc::now()) && !t.status.is_done(),
-        "due.today" => t.due.is_some_and(|d| {
-            d.with_timezone(&Local).date_naive() == Local::now().date_naive()
-        }),
+        "due.today" => t
+            .due
+            .is_some_and(|d| d.with_timezone(&Local).date_naive() == Local::now().date_naive()),
         "due" => t.due.is_some(),
         "blocked" => parents.contains(t.uid.as_str()),
         "blocking" => t.related_to.is_some(),
@@ -680,10 +777,76 @@ mod tests {
         });
         let mut t = crate::model::Task::new("work", "done");
         t.status = crate::model::TaskStatus::Completed;
-        let r = Row { id: 1, source: "work".into(), task: t };
+        let r = Row {
+            id: 1,
+            source: "work".into(),
+            task: t,
+        };
         let parents = HashSet::new();
         let line = colorize(&conf, &parents, &r, "row");
         assert!(line.starts_with("\x1b[38;5;242;48;5;234m")); // gray10 on gray2
         assert!(line.ends_with("\x1b[0m"));
+    }
+
+    #[test]
+    fn apply_rc_overrides_columns_and_labels() {
+        let conf = Config::default();
+        let mut report = Report::resolve("next", &conf);
+        let rcs = vec![
+            RcReport {
+                name: "next".into(),
+                key: "columns".into(),
+                value: "id,date,summary".into(),
+            },
+            RcReport {
+                name: "next".into(),
+                key: "labels".into(),
+                value: "ID,DATE,TASK".into(),
+            },
+        ];
+        apply_rc(&mut report, &rcs, "next").unwrap();
+        assert_eq!(report.columns.len(), 3);
+        assert_eq!(report.columns[0].field, "id");
+        assert_eq!(report.columns[1].label, "DATE");
+        assert_eq!(report.columns[2].label, "TASK");
+        assert_eq!(report.columns[1].field, "date");
+    }
+
+    #[test]
+    fn unsupported_rc_key_errors() {
+        let conf = Config::default();
+        let mut report = Report::resolve("next", &conf);
+        let rcs = vec![RcReport {
+            name: "next".into(),
+            key: "bogus".into(),
+            value: "x".into(),
+        }];
+        assert!(apply_rc(&mut report, &rcs, "next").is_err());
+    }
+
+    #[test]
+    fn default_report_labels_are_date_and_merged_status() {
+        let conf = Config::default();
+        let report = Report::resolve("next", &conf);
+        assert!(report.columns.iter().any(|c| c.label == "DATE"));
+        assert!(report.columns.iter().any(|c| c.field == "status"));
+        assert!(report.columns.iter().all(|c| c.field != "type"));
+    }
+
+    #[test]
+    fn event_renders_calendar_in_status_and_todo_relative_in_date() {
+        let conf = Config::default();
+        let report = Report::resolve("next", &conf);
+        let mut ev = crate::model::Task::new("work", "meet");
+        ev.dtstart = Some(chrono::Utc::now() + chrono::Duration::days(1));
+        let r = Row {
+            id: 1,
+            source: "work".into(),
+            task: ev,
+        };
+        let cells: Vec<String> = report.columns.iter().map(|c| cell(&conf, &r, c)).collect();
+        // status col → event calendar glyph (nerdfont), date col → plain MM/DD
+        assert_eq!(cells[1], "󰃭");
+        assert_eq!(cells[2].len(), 5); // MM/DD
     }
 }

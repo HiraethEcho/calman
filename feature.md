@@ -6,7 +6,31 @@ features that i want.
 
 ### filter
 
-add type:todo, type:event, type:all
+filter expression shared between CLI args and `report.toml` `filter` strings.
+
+- `and` / `or` / `(` / `)` supported (implicit `and` between adjacent atoms)
+- `type:todo`, `type:event`, `type:all`
+- `source:<name>` and `-source:<name>` (exclude a source)
+- `due:<date>` = exact day; `due.before:<date>` = strictly before;
+  `due.by:<date>` = on or before; `due.after:<date>` = on or after
+- todos compare `due`; events compare `dtstart`
+- virtual tags: `+OVERDUE +PENDING +COMPLETED +CANCELLED +IN-PROCESS +TAGGED
+  +UNTAGGED +SCHEDULED`; events count as `PENDING`
+
+```toml
+[report.next]
+filter = "type:todo status:active or type:event due.after:sod"
+```
+
+CLI custom report overrides (Taskwarrior rc style, for scripts):
+
+```
+calman rc.report.next.columns=id,date,summary rc.report.next.labels=ID,DATE,TASK next
+calman rc.report.next.filter='type:event due.after:sod' list
+```
+
+supported rc keys: `columns`, `labels`, `filter`, `sort`.
+`columns` accepts `field` or `field.format` (comma-separated).
 
 ### date
 
@@ -19,6 +43,7 @@ every 7d, week, 3d, month, 30d etc.
 two way for duration. repeat times and until date. for example, i want do something every friday and for 5 times, or i want to exercise every weekend, until end of the year.
 
 also, how to set every Tuesday and Friday for each week, and 7 weeks total? (a typical case for school class)
+
 
 ### report
 
@@ -127,6 +152,22 @@ No `WAITING` concept — drop it; events use `DTSTART`.
 Relations: `RELATED-TO` default `RELTYPE=PARENT` → value = parent UID; child stores parent. `A RELATED-TO:B` → B parent, A subtask.
 
 Syntax: `calman add "subitem" rel:<parent-id>` or `calman <id> modify rel:<parent-id>` writes the parent UID into the child's `related_to`.
+
+### more on report
+
+- default reports show only future events (dtstart >= start of today); todos keep
+  their current default filter
+- type + status merged into one STATUS column: events render the calendar icon,
+  todos render their status icon; events still count as `PENDING` for filters
+- DUE column renamed DATE: event → plain date (default `MM/DD`), todo →
+  relative (default); both configurable per-column via `event_format` and
+  `todo_format`:
+
+```toml
+columns = [
+  { field = "date", label = "DATE", todo_format = "relative", event_format = "%Y-%m-%d" },
+]
+```
 
 ## todo to event
 

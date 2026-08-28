@@ -46,18 +46,22 @@
     - Integrate `chrono` for UTC conversion.
 
 ### 2.2 Filter Engine
-- [ ] Parse command‑line arguments for `list` and `count`.
-- [ ] Implement `Filter` struct: support `due`, `status`, `priority`, `tags`.
-- [ ] Map predefined filters (`+OVERDUE` etc.) to filter expressions.
+- [x] Parse command‑line arguments for `list` and `count`.
+- [x] Implement `Filter` struct: support `due`, `status`, `priority`, `tags`.
+- [x] Map predefined filters (`+OVERDUE` etc.) to filter expressions.
+- [x] Shared expression grammar (CLI + report `filter`): `and`/`or`/parens, `type:all`, `source:`/`-source:`, `due.before:`/`due.by:`/`due.after:`.
 
 ### 2.3 Integration Tests & CLI Documentation
-- [ ] Write integration tests (`tests/`) covering core commands.
+- [x] Write integration tests (`tests/`) covering core commands.
 - [ ] Polish `--help` output.
 
 ### 2.4 Report Engine & Relations
 - [x] Config schema: `[report.<name>]` (columns/format/sort/filter), `[defaults] default_report`.
 - [x] Builtin reports `ls`/`list`/`next`; bare `calman` → `next`.
 - [x] Report renderer: fields (`id,status,summary,desc,tags,due,pri,type,source`), formats (`relative/countdown/iso/truncate`), `width`, `sort` (incl. `/` break).
+- [x] Builtin default filters: future events only (dtstart ≥ sod), todos unchanged.
+- [x] Merged STATUS column (event → calendar icon); DATE column + per-column `event_format`/`todo_format`.
+- [x] CLI rc overrides: `rc.report.<name>.columns=/labels=/filter=/sort=`.
 - [x] Nerdfont icons, 3-level fallback (column `icons` > `[icons]` global > builtin).
 - [x] Global row-level color rules `[[color]]`, first-match, `fg/bg/bold/underline/italic/dim`.
 - [x] Builtin virtual tags: `OVERDUE`, `DONE`≡`COMPLETED`, `CANCELLED`, `IN-PROCESS`, `TAGGED`/`UNTAGGED`, `TODO`/`EVENT`, `SCHEDULED`.

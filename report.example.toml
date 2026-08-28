@@ -13,26 +13,24 @@
 
 # ---------------------------------------------------------------- [report.ls]
 [report.ls]
-filter = "status:active"             # 报告默认过滤, 与命令行过滤 AND
+filter = "type:todo status:active or type:event due.after:sod"
 sort = ["due+", "created+"]          # key+ 升序 / key- 降序; 尾部 / = 分组空行
 columns = [
   { field = "id",      label = "ID",   width = 4 },
-  { field = "type",    label = "TYPE", icon = true },
-  { field = "status",  label = "ST",   icon = true },
-  { field = "due",     label = "DUE",  format = "relative" },
+  { field = "status",  label = "ST",   icon = true },   # event → 日历图标
+  { field = "date",    label = "DATE", todo_format = "relative" }, # event 默认 MM/DD
   { field = "summary", label = "SUMMARY" },
 ]
 
 # -------------------------------------------------------------- [report.list]
 [report.list]
-filter = "-status:completed -status:cancelled"
+filter = "type:todo -status:completed -status:cancelled or type:event due.after:sod"
 sort = ["status-", "pri-", "due+"]
 columns = [
   { field = "id",      label = "ID",     width = 4 },
-  { field = "type",    label = "TYPE",   icon = true },
   { field = "status",  label = "STATUS", icon = true },
   { field = "pri",     label = "PRI" },
-  { field = "due",     label = "DUE",    format = "relative" },
+  { field = "date",    label = "DATE",   todo_format = "relative" },
   { field = "tags",    label = "TAGS" },
   { field = "summary", label = "SUMMARY", format = "truncate", width = 40 },
   { field = "desc",    label = "DESC" },
@@ -40,21 +38,28 @@ columns = [
 
 # ------------------------------------------------------------- [report.next]
 [report.next]
-filter = "status:active"
+filter = "type:todo status:active or type:event due.after:sod"
 sort = ["due+", "pri-"]
 columns = [
   { field = "id",      label = "ID",   width = 4 },
-  { field = "type",    label = "TYPE", icon = true },
-  { field = "due",     label = "DUE",  format = "countdown" },
+  { field = "status",  label = "ST",   icon = true },
+  { field = "date",    label = "DATE", todo_format = "relative" },
   { field = "summary", label = "SUMMARY" },
 ]
 
-# 可用字段 (field): id status summary desc tags due pri type source
-#   summary = CalDAV SUMMARY; desc = DESCRIPTION; due 列对 event 显示 dtstart
-# 可用格式 (format): relative | countdown | iso | truncate
-#   truncate 配合 width 使用 (超宽截断加 …)
+# 可用字段 (field): id status summary desc tags date due pri type source
+#   summary = CalDAV SUMMARY; desc = DESCRIPTION; date/due 列对 event 显示 dtstart
+# 可用格式 (format): relative | countdown | iso | truncate; date/due 另有
+#   event_format / todo_format 分别定制 event 与 todo 的显示
+#   (默认: event = MM/DD 纯日期, todo = relative)
+# truncate 配合 width 使用 (超宽截断加 …)
 # width = 列最小宽度
-# icon = true 时 status/type 列渲染 nerdfont 图标
+# icon = true 时 status/type 列渲染 nerdfont 图标; 合并后 STATUS 列中
+#   todo 显示状态图标, event 显示日历图标
+#
+# 过滤串支持 and/or/括号, 例:
+#   filter = "type:event due.after:sod or (type:todo +urgent)"
+#   CLI 可用 rc.report.<name>.columns=... labels=... 临时覆盖, 不改配置文件
 #
 # 每列可单独覆盖图标 (优先级: 列 icons > [icons] 全局 > 内置默认):
 #   { field = "status", label = "ST", icon = true,
