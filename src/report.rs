@@ -368,8 +368,7 @@ fn cell(conf: &Config, r: &Row, c: &Column) -> String {
 }
 
 fn maybe_truncate(s: &str, c: &Column) -> String {
-    // Newlines would break table rows; render them as a visible glyph.
-    let s = s.replace('\n', "␤");
+    let s = s.replace('\n', " ");
     if c.format.as_deref() == Some("truncate") {
         let max = c.width.unwrap_or(30);
         // Truncate by terminal display width, keeping whole chars.
