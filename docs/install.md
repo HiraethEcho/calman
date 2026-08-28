@@ -11,6 +11,24 @@ cargo build --release          # binary at target/release/calman
 cargo run -- --help            # run without installing
 ```
 
+## Cargo features
+
+Compile-time feature flags (default = `storage-jsonl storage-ics date-ical
+ date-natural recur-expand`, **no TUI**):
+
+| Feature | Adds |
+|---|---|
+| `storage-jsonl` | JSONL backend (default) |
+| `storage-ics` | ICS backend + timezone serialisation (default) |
+| `date-ical` | iCalendar-compact `T` date parser + raw RRULE (default) |
+| `date-natural` | `interim` natural dates + `text2rrule` NL recurrence (default) |
+| `tui` | TUI subcommand (ratatui/crossterm) |
+| `recur-expand` | Occurrence expansion + `on:<date>`/`id.n` addressing (rrule) — default |
+
+```sh
+cargo build --no-default-features --features storage-ics,date-ical   # minimal
+```
+
 Useful during development:
 
 ```sh
@@ -38,13 +56,13 @@ calman ships two tiers of config so you can start small and grow:
 
 | Tier | Files | Purpose |
 | :--- | :---- | :------ |
-| **default** (complete reference) | `config.default.toml` | A **self-contained** file listing *every* default option — exactly what calman uses when no config file exists. It defines the default `work` source, `[defaults]`, `[contexts]`, `[date]`, `[tui]`, `[locale]`, `[icons]`, the default `[colorscheme]` row colors, and the `[report.*]` tables inline. |
+| **default** (complete reference) | `config.default.toml` | A **self-contained** file listing *every* default option — exactly what calman uses when no config file exists. It defines the default `work` source, `[defaults]`, `[contexts]`, `[date]`, `[tui]`, `[icons]`, the default `[colorscheme]` row colors, and the `[report.*]` tables inline. |
 | **example** (annotated) | `config.example.toml`, `report.example.toml`, `colorscheme.example.toml` | Heavily commented custom samples to study and copy from. |
 
 `config.default.toml` mirrors `Config::default()` — copy it as your `config.toml`
 to start from fully-known defaults and override only the keys you need. It is
 **self-contained** (no `include`): it defines the default `work` source, the
-`[defaults]`, `[contexts]`, `[date]`, `[tui]`, `[locale]`, `[icons]` sections and
+`[defaults]`, `[contexts]`, `[date]`, `[tui]`, `[icons]` sections and
 documents `[colorscheme]`, `[report.*]` and the reserved `[date]` keys inline.
 
 A typical custom `config.toml` builds on the defaults via `include`:

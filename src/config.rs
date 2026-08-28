@@ -71,6 +71,14 @@ pub struct Defaults {
     /// Name of the default report run by bare `calman` (default `next`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_report: Option<String>,
+    /// How many upcoming occurrences to expand per recurring series in
+    /// `list`/`next` (recur-expand). `0` = all future within the window.
+    #[serde(default = "default_recur_expand_count")]
+    pub recur_expand_count: usize,
+}
+
+fn default_recur_expand_count() -> usize {
+    1
 }
 
 /// A single report column.
@@ -136,10 +144,9 @@ pub struct Contexts {
 /// `[date]` — date-parsing settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DateConfig {
+    /// End of the working week (`eoww`), e.g. `"17:00"`.
     #[serde(default = "default_workweek_end")]
     pub workweek_end: String,
-    #[serde(default = "default_week_start")]
-    pub week_start: String,
     /// Fallback event length when neither `end:` nor `duration:` given (e.g. "1h").
     #[serde(default = "default_event_duration")]
     pub default_event_duration: String,
@@ -151,12 +158,6 @@ pub struct DateConfig {
     /// with a `TZID` (iOS-style local wall time). Omitted → auto-detected.
     #[serde(default = "default_timezone")]
     pub timezone: String,
-}
-
-/// `[locale]` — UI language.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LocaleConfig {
-    pub language: String,
 }
 
 /// Root config document.
@@ -172,8 +173,6 @@ pub struct Config {
     pub contexts: Contexts,
     #[serde(default)]
     pub date: DateConfig,
-    #[serde(default)]
-    pub locale: LocaleConfig,
     #[serde(default, rename = "source")]
     pub sources: Vec<Source>,
     #[serde(default, rename = "report")]
@@ -246,10 +245,6 @@ fn default_workweek_end() -> String {
     "17:00".to_string()
 }
 
-fn default_week_start() -> String {
-    "monday".to_string()
-}
-
 fn default_event_duration() -> String {
     "1h".to_string()
 }
@@ -282,18 +277,9 @@ impl Default for DateConfig {
     fn default() -> Self {
         Self {
             workweek_end: default_workweek_end(),
-            week_start: default_week_start(),
             default_event_duration: default_event_duration(),
             due_date_overdue_today: default_due_date_overdue_today(),
             timezone: default_timezone(),
-        }
-    }
-}
-
-impl Default for LocaleConfig {
-    fn default() -> Self {
-        Self {
-            language: "en".to_string(),
         }
     }
 }
@@ -305,11 +291,11 @@ impl Default for Config {
             defaults: Defaults {
                 write_source: "work".to_string(),
                 default_report: None,
+                recur_expand_count: default_recur_expand_count(),
             },
             // Empty contexts → fall back to all (selected) sources per DESIGN §1.2.
             contexts: Contexts::default(),
             date: DateConfig::default(),
-            locale: LocaleConfig::default(),
             sources: vec![Source {
                 name: "work".to_string(),
                 source_type: SourceType::Jsonl,
@@ -418,11 +404,6 @@ impl Config {
             }
         }
     }
-
-    /// Look up a source by name.
-    pub fn source(&self, name: &str) -> Option<&Source> {
-        self.sources.iter().find(|s| s.name == name)
-    }
 }
 
 /// Which default source list a command uses.
@@ -500,6 +481,7 @@ mod tests {
             defaults: Defaults {
                 write_source: "work".into(),
                 default_report: None,
+                recur_expand_count: 1,
             },
             contexts: Contexts {
                 cli: vec!["work".into(), "personal".into()],
@@ -507,7 +489,6 @@ mod tests {
                 tui: Vec::new(),
             },
             date: DateConfig::default(),
-            locale: LocaleConfig::default(),
             reports: HashMap::new(),
             icons: IconsCfg::default(),
             colorscheme: None,

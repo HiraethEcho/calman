@@ -4,7 +4,7 @@
 //! iCalendar serialization covering the core `Task` fields.
 
 use super::{Storage, atomic_write};
-use crate::date_parser::local_midnight;
+use crate::date::local_midnight;
 use crate::model::{Task, TaskStatus};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDateTime, SecondsFormat, TimeZone, Utc};
@@ -120,7 +120,9 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
     lines.push_str(&format!("BEGIN:{component}\r\n"));
 
     let mut props = Vec::new();
-    props.push(format!("UID:{}", escape_text(&task.uid)));
+    // Override components use the master's UID; parent_uid holds the stored uid.
+    let uid = task.parent_uid.as_deref().unwrap_or(&task.uid);
+    props.push(format!("UID:{}", escape_text(uid)));
     props.push(format!("SUMMARY:{}", escape_text(&task.summary)));
     // DTSTAMP is REQUIRED by RFC 5545; SEQUENCE aids CalDAV sync ordering.
     props.push(format!("DTSTAMP:{}", dt(Utc::now())));
@@ -191,6 +193,36 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
     if let Some(r) = &task.rrule {
         props.push(format!("RRULE:{r}"));
     }
+    // Emit EXDATE for each excluded occurrence.
+    for ex in &task.exdates {
+        if task.allday {
+            props.push(format!(
+                "EXDATE;VALUE=DATE:{}",
+                ex.with_timezone(&Local).format("%Y%m%d")
+            ));
+        } else {
+            props.push(format!(
+                "EXDATE;TZID={}:{}",
+                tz.name(),
+                dt_local(*ex, tz)
+            ));
+        }
+    }
+    // Emit RECURRENCE-ID for override instances.
+    if let Some(rid) = task.recurrence_id {
+        if task.allday {
+            props.push(format!(
+                "RECURRENCE-ID;VALUE=DATE:{}",
+                rid.with_timezone(&Local).format("%Y%m%d")
+            ));
+        } else {
+            props.push(format!(
+                "RECURRENCE-ID;TZID={}:{}",
+                tz.name(),
+                dt_local(rid, tz)
+            ));
+        }
+    }
     if let Some(l) = &task.location {
         props.push(format!("LOCATION:{}", escape_text(l)));
     }
@@ -233,6 +265,9 @@ pub fn parse_ics(content: &str) -> Result<Task> {
     let mut allday = false;
     let mut alarm_before = None;
     let mut in_alarm = false;
+    let mut exdates = Vec::new();
+    let mut recurrence_id = None;
+    let mut parent_uid = None;
 
     for raw in unfold(content) {
         let (name, value) = raw
@@ -289,6 +324,32 @@ pub fn parse_ics(content: &str) -> Result<Task> {
                 }
             }
             "RRULE" => rrule = Some(value.to_string()),
+            "EXDATE" => {
+                let tz = param_tzid(name);
+                let d = match (&tz, name.contains("VALUE=DATE")) {
+                    (_, true) => parse_all_day(value),
+                    (Some(tz), false) => parse_tz(value, tz),
+                    (None, _) => parse_dt(value),
+                };
+                if let Some(dt) = d {
+                    exdates.push(dt);
+                }
+            }
+            "RECURRENCE-ID" => {
+                let tz = param_tzid(name);
+                let d = match (&tz, name.contains("VALUE=DATE")) {
+                    (_, true) => parse_all_day(value),
+                    (Some(tz), false) => parse_tz(value, tz),
+                    (None, _) => parse_dt(value),
+                };
+                recurrence_id = d;
+                // For an override component, the UID stays the master's uid;
+                // we record the current uid as parent_uid and use the
+                // current (per-component) uid for storage.
+                if !uid.is_empty() {
+                    parent_uid = Some(uid.clone());
+                }
+            }
             "LOCATION" => location = Some(unescape_text(value)),
             "RELATED-TO" => related_to = Some(value.to_string()),
             "CREATED" => created_at = parse_dt(value),
@@ -296,6 +357,11 @@ pub fn parse_ics(content: &str) -> Result<Task> {
             "TRIGGER" if in_alarm => alarm_before = parse_trigger(value),
             _ => {}
         }
+    }
+
+    // A component carrying RRULE is the recurring master.
+    if rrule.is_some() {
+        status = TaskStatus::Recurring;
     }
 
     if uid.is_empty() {
@@ -322,6 +388,9 @@ pub fn parse_ics(content: &str) -> Result<Task> {
         alarm_before,
         created_at: created_at.unwrap_or_else(Utc::now),
         updated_at: updated_at.unwrap_or_else(Utc::now),
+        exdates,
+        recurrence_id,
+        parent_uid,
     })
 }
 
@@ -417,6 +486,7 @@ fn status_to_ics(s: TaskStatus) -> &'static str {
     match s {
         TaskStatus::Pending => "NEEDS-ACTION",
         TaskStatus::InProgress => "IN-PROCESS",
+        TaskStatus::Recurring => "NEEDS-ACTION",
         TaskStatus::Completed => "COMPLETED",
         TaskStatus::Cancelled => "CANCELLED",
     }
@@ -426,6 +496,7 @@ fn status_to_ics(s: TaskStatus) -> &'static str {
 fn event_status_to_ics(s: TaskStatus) -> &'static str {
     match s {
         TaskStatus::Cancelled => "CANCELLED",
+        TaskStatus::Recurring => "CONFIRMED",
         _ => "CONFIRMED",
     }
 }
@@ -447,10 +518,26 @@ fn escape_text(s: &str) -> String {
 }
 
 fn unescape_text(s: &str) -> String {
-    s.replace("\\n", "\n")
-        .replace("\\,", ",")
-        .replace("\\;", ";")
-        .replace("\\\\", "\\")
+    let mut out = String::new();
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => out.push('\n'),
+                Some(',') => out.push(','),
+                Some(';') => out.push(';'),
+                Some('\\') => out.push('\\'),
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Unfold RFC 5545 folded lines, dropping continuation spaces.
@@ -517,10 +604,10 @@ mod tests {
     fn allday_and_alarm_roundtrip() {
         let mut t = make_task();
         t.allday = true;
-        t.dtstart = Some(crate::date_parser::local_midnight(
+        t.dtstart = Some(crate::date::local_midnight(
             chrono::NaiveDate::from_ymd_opt(2026, 8, 12).unwrap(),
         ));
-        t.dtend = Some(crate::date_parser::local_midnight(
+        t.dtend = Some(crate::date::local_midnight(
             chrono::NaiveDate::from_ymd_opt(2026, 8, 14).unwrap(),
         ));
         t.alarm_before = Some(900);
@@ -564,5 +651,58 @@ mod tests {
             t.due.unwrap().format("%Y%m%dT%H%M%SZ").to_string(),
             "20260825T090000Z"
         );
+    }
+
+    #[test]
+    fn rrule_parses_as_recurring() {
+        let content = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:series-1\r\nSUMMARY:standup\r\nDTSTART;TZID=Asia/Shanghai:20260901T090000\r\nRRULE:FREQ=WEEKLY;BYDAY=TU\r\nDTSTAMP:20260824T134610Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let t = parse_ics(content).unwrap();
+        assert_eq!(t.status, TaskStatus::Recurring);
+        assert_eq!(t.rrule.as_deref(), Some("FREQ=WEEKLY;BYDAY=TU"));
+    }
+
+    #[test]
+    fn parse_override_sets_recurrence_id_and_parent_uid() {
+        let content = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:series-1\r\nSUMMARY:rescheduled\r\nDTSTART;TZID=Asia/Shanghai:20260908T100000\r\nRECURRENCE-ID;TZID=Asia/Shanghai:20260901T090000\r\nDTSTAMP:20260824T134610Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let t = parse_ics(content).unwrap();
+        assert!(t.recurrence_id.is_some());
+        assert_eq!(t.parent_uid.as_deref(), Some("series-1"));
+        assert_eq!(
+            t.recurrence_id.unwrap().format("%Y%m%dT%H%M%SZ").to_string(),
+            "20260901T010000Z"
+        );
+    }
+
+    #[test]
+    fn render_parent_emits_rrule_and_exdate() {
+        let mut t = Task::new("work", "standup");
+        t.status = TaskStatus::Recurring;
+        t.dtstart = Some(chrono::Utc::now());
+        t.rrule = Some("FREQ=WEEKLY;BYDAY=TU".to_string());
+        t.exdates.push(chrono::Utc::now() + chrono::Duration::days(7));
+        let out = render_ics(&t, chrono_tz::Tz::Asia__Shanghai).unwrap();
+        assert!(out.contains("RRULE:FREQ=WEEKLY;BYDAY=TU"));
+        assert!(out.contains("EXDATE;TZID=Asia/Shanghai:"));
+        assert!(out.contains("STATUS:CONFIRMED"));
+    }
+
+    #[test]
+    fn render_override_uses_parent_uid_and_recurrence_id() {
+        let mut t = Task::new("work", "rescheduled");
+        t.status = TaskStatus::Pending;
+        t.dtstart = Some(chrono::Utc::now());
+        t.parent_uid = Some("series-1".to_string());
+        t.recurrence_id = Some(chrono::Utc::now() - chrono::Duration::days(7));
+        let out = render_ics(&t, chrono_tz::Tz::Asia__Shanghai).unwrap();
+        assert!(out.contains("UID:series-1"));
+        assert!(out.contains("RECURRENCE-ID;TZID=Asia/Shanghai:"));
+        assert!(!out.contains("RRULE:"));
+    }
+
+    #[test]
+    fn escape_unescape_roundtrip_preserves_backslashes_and_newlines() {
+        let s = "a\\b\nline2;comma,ok";
+        let esc = escape_text(s);
+        assert_eq!(unescape_text(&esc), s);
     }
 }

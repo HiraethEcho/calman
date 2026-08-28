@@ -81,9 +81,13 @@ sort = ["due+"]
 columns = [
   { field = "id",      label = "ID",   width = 4 },
   { field = "date",    label = "DUE",  todo_format = "relative" },
+  { field = "recur",   label = "RECUR" },
   { field = "summary", label = "TASK" },
 ]
 ```
+
+`recur` renders the recurrence pattern as an ISO 8601 period (`P7D`, `P2W`,
+`P1M`, `P1Y`); empty for non-recurring items.
 
 ## `rc` overrides (script-friendly)
 

@@ -199,7 +199,8 @@ fn date_col(label: &str, todo_format: &str) -> Column {
 fn builtin(name: &str) -> Report {
     let (filter, sort, columns) = match name {
         "ls" => (
-            "type:todo status:active or type:event due.after:sod".to_string(),
+            "type:todo status:active -status:recurring or type:event due.after:sod -status:recurring"
+                .to_string(),
             vec!["due+", "created+"],
             vec![
                 col("id", "ID", Some(4), None, false),
@@ -209,7 +210,8 @@ fn builtin(name: &str) -> Report {
             ],
         ),
         "list" => (
-            "type:todo -status:completed -status:cancelled or type:event due.after:sod".to_string(),
+            "type:todo -status:completed -status:cancelled -status:recurring or type:event due.after:sod -status:recurring"
+                .to_string(),
             vec!["status-", "pri-", "due+"],
             vec![
                 col("id", "ID", Some(4), None, false),
@@ -217,12 +219,14 @@ fn builtin(name: &str) -> Report {
                 col("pri", "PRI", None, None, false),
                 date_col("DATE", "relative"),
                 col("tags", "TAGS", None, None, false),
+                col("recur", "RECUR", None, None, false),
                 col("summary", "SUMMARY", None, None, false),
-                col("desc", "DESC", None, None, false),
+                col("desc", "DESC", Some(40), Some("truncate"), false),
             ],
         ),
         "next" => (
-            "type:todo status:active or type:event due.after:sod".to_string(),
+            "type:todo status:active -status:recurring or type:event due.after:sod -status:recurring"
+                .to_string(),
             vec!["due+", "pri-"],
             vec![
                 col("id", "ID", Some(4), None, false),
@@ -278,9 +282,9 @@ pub fn render(conf: &Config, report: &Report, rows: &[&Row]) -> String {
         .collect();
 
     for (ci, c) in report.columns.iter().enumerate() {
-        let mut w = c.label.chars().count();
+        let mut w = unicode_width::UnicodeWidthStr::width(c.label.as_str());
         for row in &cells {
-            w = w.max(row[ci].chars().count());
+            w = w.max(unicode_width::UnicodeWidthStr::width(row[ci].as_str()));
         }
         if let Some(mw) = c.width {
             w = w.max(mw);
@@ -354,20 +358,37 @@ fn cell(conf: &Config, r: &Row, c: &Column) -> String {
         "due" => date_str(conf, r, c),
         "pri" => pri_str(t.priority),
         "source" => t.source.clone(),
+        "recur" | "recurrence" => t
+            .rrule
+            .as_deref()
+            .map(crate::recurrence::rrule_period)
+            .unwrap_or_default(),
         _ => String::new(),
     }
 }
 
 fn maybe_truncate(s: &str, c: &Column) -> String {
+    // Newlines would break table rows; render them as a visible glyph.
+    let s = s.replace('\n', "␤");
     if c.format.as_deref() == Some("truncate") {
         let max = c.width.unwrap_or(30);
-        let n = s.chars().count();
-        if n > max {
-            let cut: String = s.chars().take(max.saturating_sub(1)).collect();
-            return format!("{cut}…");
+        // Truncate by terminal display width, keeping whole chars.
+        let mut w = 0;
+        let mut cut = String::new();
+        for ch in s.chars() {
+            let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+            if w + cw + 1 > max {
+                // Reserve one cell for the ellipsis.
+                cut.push('…');
+                return cut;
+            }
+            cut.push(ch);
+            w += cw;
         }
+        s
+    } else {
+        s
     }
-    s.to_string()
 }
 
 fn date_str(conf: &Config, r: &Row, c: &Column) -> String {
@@ -482,6 +503,7 @@ fn status_txt(s: TaskStatus) -> &'static str {
     match s {
         TaskStatus::Pending => "pending",
         TaskStatus::InProgress => "in-progress",
+        TaskStatus::Recurring => "recurring",
         TaskStatus::Completed => "completed",
         TaskStatus::Cancelled => "cancelled",
     }
@@ -519,6 +541,7 @@ fn builtin_status_icon(kind: &str, val: &str) -> Option<String> {
     let s = match val {
         "pending" => "○",
         "in-progress" => "●",
+        "recurring" => "⟳",
         "completed" => "✓",
         "cancelled" => "✕",
         _ => return None,
@@ -550,11 +573,18 @@ fn sort_val(r: &Row, field: &str) -> SVal {
             .unwrap_or(i64::MAX),
         ),
         "pri" => SVal::Num(t.priority.unwrap_or(0) as i64),
+        "recur" | "recurrence" => SVal::Str(
+            t.rrule
+                .as_deref()
+                .map(crate::recurrence::rrule_period)
+                .unwrap_or_default(),
+        ),
         "status" => SVal::Num(match t.status {
             TaskStatus::Pending => 0,
             TaskStatus::InProgress => 1,
-            TaskStatus::Completed => 2,
-            TaskStatus::Cancelled => 3,
+            TaskStatus::Recurring => 2,
+            TaskStatus::Completed => 3,
+            TaskStatus::Cancelled => 4,
         }),
         "type" => SVal::Str(if t.is_event() {
             "event".into()
@@ -576,7 +606,8 @@ fn cmp_sval(a: &SVal, b: &SVal) -> Ordering {
 }
 
 fn pad(s: &str, w: usize) -> String {
-    let n = s.chars().count();
+    // Pad by terminal display width, not char count (CJK renders 2 cells).
+    let n = unicode_width::UnicodeWidthStr::width(s);
     if n >= w {
         return s.to_string();
     }
@@ -756,6 +787,7 @@ mod tests {
             id,
             source: "work".into(),
             task: crate::model::Task::new("work", summary),
+            occ: None,
         }
     }
 
@@ -828,6 +860,7 @@ mod tests {
             id: 1,
             source: "work".into(),
             task: t,
+            occ: None,
         };
         let parents = HashSet::new();
         let line = colorize(&conf, &parents, &r, "row");
@@ -890,6 +923,7 @@ mod tests {
             id: 1,
             source: "work".into(),
             task: ev,
+            occ: None,
         };
         let cells: Vec<String> = report.columns.iter().map(|c| cell(&conf, &r, c)).collect();
         // status col → event calendar glyph (built-in default for events),
@@ -910,6 +944,7 @@ mod tests {
             id: 1,
             source: "work".into(),
             task: ev,
+            occ: None,
         };
         let ev_cells: Vec<String> = report.columns.iter().map(|c| cell(&conf, &r, c)).collect();
         assert_eq!(ev_cells[1], "E");
@@ -918,6 +953,7 @@ mod tests {
             id: 2,
             source: "work".into(),
             task: crate::model::Task::new("work", "chore"),
+            occ: None,
         };
         let t_cells: Vec<String> = report.columns.iter().map(|c| cell(&conf, &t, c)).collect();
         assert_eq!(t_cells[1], "T");

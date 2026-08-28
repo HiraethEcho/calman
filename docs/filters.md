@@ -9,13 +9,13 @@ against the **unified** item: todos compare `due`, events compare `dtstart`.
 | Atom | Meaning |
 | :--- | :------ |
 | `type:todo` \| `type:event` \| `type:all` | Kind selector. Aliases `+TODO` / `+EVENT`. |
-| `source:<name>` | Item belongs to `<name>`. |
-| `-source:<name>` | Item does **not** belong to `<name>`. |
+| `source:<name>` / `src:<name>` | Item belongs to `<name>`. |
+| `-source:<name>` / `-src:<name>` | Item does **not** belong to `<name>`. |
 | `due:<day>` | Exact calendar day (`due:today` = today). |
 | `due.before:<date>` | Strictly **before** (`<`). |
 | `due.by:<date>` | On or before (`<=`). |
 | `due.after:<date>` | On or after (`>=`). |
-| `status:pending\|in-progress\|completed\|cancelled\|active` | Lifecycle status (`active` = not done). |
+| `status:pending\|in-progress\|completed\|cancelled\|recurring\|active` | Lifecycle status (`active` = pending/in-progress; `recurring` = series master). |
 | `priority:<lvl>` (alias `pri:<lvl>`) | `high`/`h`/`9`, `medium`/`m`/`5`, `low`/`l`/`1`, or 0–9. |
 | `+tag` / `-tag` | Has / lacks the tag. |
 | `+VIRTUAL` / `-VIRTUAL` | Virtual tag (see below). |
@@ -55,9 +55,11 @@ A B or C D        =  (A and B) or (C and D)
 ```sh
 calman type:event due.after:sod
 calman type:todo +PENDING or type:event
-calman '(status:active or status:in-progress) source:work'
+calman '(status:active or status:in-progress) src:work'
 calman count +OVERDUE
 calman list -status:completed -status:cancelled +TAGGED
+calman list +PARENT              # show recurring series masters
+calman list status:recurring
 ```
 
 ## Reports vs. CLI filters

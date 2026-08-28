@@ -9,11 +9,14 @@
 //!
 //! Output has no `RRULE:` prefix; `storage/ics.rs` adds it.
 
-use crate::date_parser::{DateValue, parse_date_value};
+#[cfg(feature = "date-natural")]
+use crate::date::{DateValue, parse_date_value};
 use anyhow::{Result, bail};
+#[cfg(feature = "date-natural")]
 use chrono::{Datelike, Local, NaiveDate};
 
 /// Map a weekday token to its `BYDAY` code.
+#[cfg(feature = "date-natural")]
 fn weekday_code(t: &str) -> Option<&'static str> {
     let t = t.trim_end_matches('.');
     if t.starts_with("mon") {
@@ -36,6 +39,7 @@ fn weekday_code(t: &str) -> Option<&'static str> {
 }
 
 /// Map a unit token (`d`/`day`/`days`/`w`/`week`...) to a `FREQ` value.
+#[cfg(feature = "date-natural")]
 fn freq_from_unit(s: &str) -> Option<&'static str> {
     let s = s.trim_end_matches('.');
     if s.starts_with('d') {
@@ -52,6 +56,7 @@ fn freq_from_unit(s: &str) -> Option<&'static str> {
 }
 
 /// Split `7d` / `30days` into `(count, freq)`.
+#[cfg(feature = "date-natural")]
 fn number_unit(t: &str) -> Option<(u32, &'static str)> {
     let split = t
         .char_indices()
@@ -66,6 +71,7 @@ fn number_unit(t: &str) -> Option<(u32, &'static str)> {
     Some((n, freq))
 }
 
+#[cfg(feature = "date-natural")]
 fn eoy() -> String {
     let y = Local::now().year();
     NaiveDate::from_ymd_opt(y, 12, 31)
@@ -74,6 +80,7 @@ fn eoy() -> String {
         .to_string()
 }
 
+#[cfg(feature = "date-natural")]
 fn eom() -> String {
     let now = Local::now().date_naive();
     let (y, m) = (now.year(), now.month());
@@ -88,6 +95,7 @@ fn eom() -> String {
     last.format("%Y%m%d").to_string()
 }
 
+#[cfg(feature = "date-natural")]
 fn parse_until(v: &str) -> Result<String> {
     match v {
         "eoy" => return Ok(eoy()),
@@ -103,7 +111,91 @@ fn parse_until(v: &str) -> Result<String> {
 }
 
 /// Normalize a user recurrence expression into a standard `RRULE` value.
+///
+/// - Raw `FREQ=` / `RRULE:` passthrough (always available).
+/// - With `date-natural`: also accept natural language via [`text2rrule`],
+///   falling back to the built-in friendly parser for forms it doesn't cover
+///   (e.g. `until:eoy`, `for N times`).
+/// - Without `date-natural`: only raw `FREQ=`/`RRULE:` are accepted.
 pub fn normalize_recurrence(input: &str) -> Result<String> {
+    let s = input.trim();
+    if s.is_empty() {
+        bail!("empty recurrence");
+    }
+    let up = s.to_uppercase();
+    if up.starts_with("FREQ=") {
+        return Ok(up);
+    }
+    if let Some(v) = up.strip_prefix("RRULE:") {
+        return Ok(v.to_string());
+    }
+    if let Some(r) = iso_period_to_rrule(&up) {
+        return Ok(r);
+    }
+    #[cfg(feature = "date-natural")]
+    {
+        if let Ok(r) = crate::date::natural_to_rrule(s) {
+            return Ok(r);
+        }
+        normalize_friendly(s)
+    }
+    #[cfg(not(feature = "date-natural"))]
+    {
+        bail!(
+            "only RFC 5545 RRULE accepted in this build (enable `date-natural` for \
+             natural-language recurrence): `{input}`"
+        )
+    }
+}
+
+/// Map an ISO 8601 period (`P7D`, `P2W`, `P1M`, `P1Y`) to an `RRULE`.
+/// Always available (no `date-natural` needed).
+fn iso_period_to_rrule(up: &str) -> Option<String> {
+    let body = up.strip_prefix('P')?;
+    if body.len() < 2 {
+        return None;
+    }
+    let (num, unit) = body.split_at(body.len() - 1);
+    let n: u32 = num.parse().ok()?;
+    if n == 0 {
+        return None;
+    }
+    let freq = match unit {
+        "D" => "DAILY",
+        "W" => "WEEKLY",
+        "M" => "MONTHLY",
+        "Y" => "YEARLY",
+        _ => return None,
+    };
+    if n == 1 {
+        Some(format!("FREQ={freq}"))
+    } else {
+        Some(format!("FREQ={freq};INTERVAL={n}"))
+    }
+}
+
+/// Render an `RRULE` as an ISO 8601 period (`P7D`, `P2W`, `P1M`, `P1Y`).
+/// Non-periodic rules (no `FREQ`) fall back to the raw RRULE text.
+pub fn rrule_period(rrule: &str) -> String {
+    let up = rrule.to_uppercase();
+    let freq = up.split(';').find_map(|p| p.strip_prefix("FREQ="));
+    let interval = up
+        .split(';')
+        .find_map(|p| p.strip_prefix("INTERVAL="))
+        .and_then(|v| v.parse::<u32>().ok());
+    let unit = match freq {
+        Some("DAILY") => "D",
+        Some("WEEKLY") => "W",
+        Some("MONTHLY") => "M",
+        Some("YEARLY") => "Y",
+        _ => return rrule.to_string(),
+    };
+    format!("P{}{}", interval.unwrap_or(1), unit)
+}
+
+/// Built-in friendly recurrence parser (fallback used under `date-natural`).
+#[cfg(feature = "date-natural")]
+fn normalize_friendly(input: &str) -> Result<String> {
     let s = input.trim();
     if s.is_empty() {
         bail!("empty recurrence");
@@ -242,7 +334,7 @@ pub fn normalize_recurrence(input: &str) -> Result<String> {
     Ok(parts.join(";"))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "date-natural"))]
 mod tests {
     use super::*;
 
@@ -293,5 +385,38 @@ mod tests {
             r("daily until:eoy").len(),
             "FREQ=DAILY;UNTIL=20261231".len()
         );
+    }
+}
+
+#[cfg(test)]
+mod iso_tests {
+    use super::*;
+
+    #[test]
+    fn iso_period_to_rrule_mapping() {
+        assert_eq!(iso_period_to_rrule("P7D"), Some("FREQ=DAILY;INTERVAL=7".into()));
+        assert_eq!(iso_period_to_rrule("P2W"), Some("FREQ=WEEKLY;INTERVAL=2".into()));
+        assert_eq!(iso_period_to_rrule("P1M"), Some("FREQ=MONTHLY".into()));
+        assert_eq!(iso_period_to_rrule("P1Y"), Some("FREQ=YEARLY".into()));
+        assert_eq!(iso_period_to_rrule("P0D"), None);
+        assert_eq!(iso_period_to_rrule("PT15M"), None);
+    }
+
+    #[test]
+    fn normalize_recurrence_accepts_iso_period_without_natural() {
+        assert_eq!(
+            normalize_recurrence("P7D").unwrap(),
+            "FREQ=DAILY;INTERVAL=7"
+        );
+        assert_eq!(normalize_recurrence("p2w").unwrap(), "FREQ=WEEKLY;INTERVAL=2");
+    }
+
+    #[test]
+    fn rrule_period_rendering() {
+        assert_eq!(rrule_period("FREQ=DAILY;INTERVAL=7"), "P7D");
+        assert_eq!(rrule_period("FREQ=WEEKLY;BYDAY=TU,FR"), "P1W");
+        assert_eq!(rrule_period("FREQ=MONTHLY;INTERVAL=3"), "P3M");
+        assert_eq!(rrule_period("FREQ=YEARLY"), "P1Y");
+        assert_eq!(rrule_period("garbage"), "garbage");
     }
 }

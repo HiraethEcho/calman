@@ -13,7 +13,7 @@
 //! (events count as pending). The `due*` key is unified: todos use `due`,
 //! events use `dtstart`.
 
-use crate::date_parser::parse_datetime;
+use crate::date::parse_datetime;
 use crate::model::{Task, TaskStatus, priority_from_str};
 use anyhow::{Result, bail};
 use chrono::{DateTime, Local, Utc};
@@ -46,6 +46,7 @@ pub enum Flag {
     Tagged,
     Untagged,
     Scheduled,
+    Parent,
 }
 
 /// A single positive atom. Negations live in `Expr::Not`.
@@ -162,6 +163,7 @@ fn flag_matches(f: Flag, t: &Task, overdue_allday_today: bool) -> bool {
         Flag::Tagged => !t.tags.is_empty(),
         Flag::Untagged => t.tags.is_empty(),
         Flag::Scheduled => t.is_event(),
+        Flag::Parent => t.is_parent(),
         Flag::Overdue => {
             let Some(d) = task_date(t) else {
                 return false;
@@ -304,7 +306,7 @@ fn parse_unary(toks: &[String], pos: &mut usize) -> Result<Expr> {
 /// Parse one atom token (which may be `-<atom>` / `+<atom>` for negation).
 fn parse_atom(tok: &str) -> Result<Expr> {
     let lower = tok.to_ascii_lowercase();
-    if let Some(inner) = lower.strip_prefix("-source:") {
+    if let Some(inner) = lower.strip_prefix("-source:").or_else(|| lower.strip_prefix("-src:")) {
         let f = Filter {
             source: Some(inner.to_string()),
             ..Filter::default()
@@ -351,7 +353,7 @@ fn parse_atom(tok: &str) -> Result<Expr> {
             ..Filter::default()
         }))));
     }
-    if let Some(rest) = lower.strip_prefix("source:") {
+    if let Some(rest) = lower.strip_prefix("source:").or_else(|| lower.strip_prefix("src:")) {
         return Ok(Expr::Atom(Filter {
             source: Some(rest.to_string()),
             ..Filter::default()
@@ -453,6 +455,7 @@ fn virtual_flag(lname: &str) -> Option<Flag> {
         "tagged" => Some(Flag::Tagged),
         "untagged" => Some(Flag::Untagged),
         "scheduled" => Some(Flag::Scheduled),
+        "parent" => Some(Flag::Parent),
         _ => None,
     }
 }
@@ -476,6 +479,7 @@ fn parse_status_atom(lower: &str) -> Result<Filter> {
             }
             "completed" | "done" => Some(TaskStatus::Completed),
             "cancelled" | "canceled" => Some(TaskStatus::Cancelled),
+            "recurring" => Some(TaskStatus::Recurring),
             _ => bail!("unknown status `{rest}`"),
         },
         // `status:active` is its own boolean clause, not a raw TaskStatus.

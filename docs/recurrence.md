@@ -29,7 +29,21 @@ recur:RRULE:FREQ=DAILY;UNTIL=20260925
 # → FREQ=DAILY;UNTIL=20260925
 ```
 
-### 2. Friendly grammar
+### 2. ISO 8601 period
+
+A plain period (`P7D`, `P2W`, `P1M`, `P1Y`) maps to a frequency + interval.
+Always available, even in builds without the `date-natural` feature:
+
+```sh
+recur:P7D → FREQ=DAILY;INTERVAL=7
+recur:P2W → FREQ=WEEKLY;INTERVAL=2
+recur:P1M → FREQ=MONTHLY
+```
+
+`alert:`/`duration:` accept ISO 8601 durations too: `PT15M`, `PT1H30M`,
+`P7D`, `P2W`.
+
+### 3. Friendly grammar
 
 The friendly parser is whitespace/comma-driven and ignores the words `every`
 and `and`. It understands:
@@ -83,6 +97,54 @@ calman add "pill" due:today recur:"FREQ=DAILY;UNTIL=20260925"
   byte-for-byte, so importing/exporting keeps recurrence intact.
 - All-day recurrence (`due:`/`start:` date-only) is stored with `VALUE=DATE`,
   matching how iOS Reminders represents all-day repeating items.
+
+## Series model (Taskwarrior-style)
+
+- A task created with `recur:` gets `status = recurring` (the series master).
+- The master carries the `RRULE`; it is a virtual `+PARENT` (filterable,
+  e.g. `calman list +PARENT`, `calman list status:recurring`).
+- Masters are hidden from `ls`/`list`/`next` by default (reports append
+  `-status:recurring`). Pass `+PARENT` to reveal them.
+- `done <id>` on a master ⇒ `cancelled` (stops the series). `delete <id>`
+  removes it entirely.
+- `modify <id>` edits the master record itself (its `.ics`/`.jsonl` file).
+
+## Per-occurrence exceptions (iOS-compatible)
+
+With the optional `recur-expand` Cargo feature (default on), `list`/`next`
+expand masters into virtual occurrence rows (id `1.1`, `1.2`, … with the
+occurrence's date).
+By default only the **nearest** upcoming occurrence per series is shown;
+`[defaults] recur_expand_count` controls how many (default `1`, `0` = all
+future within the 1-year window):
+
+```toml
+[defaults]
+recur_expand_count = 1   # nearest only (default)
+# recur_expand_count = 0 # all future occurrences
+```
+
+Occurrences can be addressed individually — expanded rows carry plain
+sequential IDs (Taskwarrior-style), and `id.n` / `on:<date>` remain valid
+aliases:
+
+```
+calman done 5                     # skip the 5th row (an expanded occurrence) → EXDATE
+calman done 5.2                  # skip the 2nd upcoming occurrence of series 5 → EXDATE
+calman done 5 on:2026-09-02      # skip the occurrence starting that day → EXDATE
+calman modify 5.1 summary:x      # override 1st occurrence → RECURRENCE-ID sibling
+calman modify 5 on:2026-09-02 summary:x
+```
+
+- `done`/`delete` on an occurrence appends its original `DTSTART` to the
+  master's `EXDATE`s — iOS Calendar hides that instance.
+- `modify` on an occurrence stores a new sibling component with the **same
+  `UID`** as the master plus `RECURRENCE-ID` = the occurrence's original
+  `DTSTART` — iOS Calendar shows the overridden fields for that instance.
+- Override records are stored with `recurrence_id`/`parent_uid` in JSONL and
+  serialised as `RECURRENCE-ID` components in ICS.
+- Occurrence addressing requires `recur-expand`; without it, `on:`/`id.n`
+  error out.
 
 ## Notes
 

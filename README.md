@@ -90,6 +90,23 @@ calman add "pay" due:eom recur:FREQ=MONTHLY;UNTIL=20261231
 - weekdays: `every tuesday and friday` / `every weekend`
 - end: `for 5 times` / `for 7 weeks` / `count:5` / `until:20260925` / `until:eoy` / `until:eom`
 - raw passthrough: `recur:FREQ=WEEKLY;BYDAY=TU,FR`
+- ISO 8601 period: `recur:P7D` → `FREQ=DAILY;INTERVAL=7` (also `P2W`/`P1M`/`P1Y`)
+- natural language (default build): `recur:"every tuesday"`
+
+**Series model**: a task with `recur:` becomes the recurring **master**
+(`status:recurring`, virtual tag `+PARENT`). Masters are hidden from
+`ls`/`list`/`next` by default — show with `calman list +PARENT`. `done` on a
+master cancels the whole series.
+
+**Per-occurrence exceptions** (`recur-expand` is default):
+`list` shows the nearest upcoming occurrence per series as a virtual row with a
+plain sequential ID (`[defaults] recur_expand_count = 1`; `0` = all future);
+address one via its plain ID, `on:<date>`, or `<id>.<n>`:
+
+```sh
+calman done 5.2                 # skip occurrence → EXDATE
+calman modify 5.1 summary:x     # override occurrence → RECURRENCE-ID sibling
+```
 
 ## Filters
 
@@ -99,8 +116,8 @@ Shared by CLI args and report `filter` strings.
 type:todo | type:event | type:all        (+TODO / +EVENT)
 source:work   -source:work
 due:today (exact day)  due.before:<  due.by:<=  due.after:>=
-status:pending|in-progress|completed|cancelled|active
-+OVERDUE +PENDING +COMPLETED +CANCELLED +IN-PROCESS +TAGGED +UNTAGGED +SCHEDULED
+status:pending|in-progress|completed|cancelled|recurring|active
++OVERDUE +PENDING +COMPLETED +CANCELLED +IN-PROCESS +TAGGED +UNTAGGED +SCHEDULED +PARENT
 +tag / -tag
 ```
 

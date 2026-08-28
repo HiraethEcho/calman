@@ -19,12 +19,17 @@ use crate::storage::ics::IcsStorage;
 use crate::storage::jsonl::JsonlStorage;
 use crate::storage::{Storage, Store};
 use anyhow::{Result, bail};
+use chrono::{DateTime, Utc};
+#[cfg(feature = "recur-expand")]
+use chrono::{Duration, Local};
 
 /// One merged row across selected sources, with a dynamic short ID.
 pub struct Row {
     pub id: usize,
     pub source: String,
     pub task: Task,
+    /// Virtual expanded occurrence index (recur-expand): renders as `id.occ`.
+    pub occ: Option<usize>,
 }
 
 /// Filter cheat-sheet printed by `calman help` / `calman filters`.
@@ -52,6 +57,9 @@ COMMON OPTIONS (add / modify)
   rel:<id>          parent relation (RELATED-TO)
   recur:<rule>      recurrence (alias `repeat:`)
   location:<text> alert:<lead> desc:<text>
+  on:<date>         target one occurrence of a recurring series (needs `recur-expand`)
+  <id>.<n>          nth upcoming occurrence (e.g. `done 5.2`, `modify 5.1 summary:x`)
+                    expanded occurrences also get plain sequential IDs (`done 5` works)
 
 RECURRENCE (recur: / repeat:)  → standard RFC 5545 RRULE
   raw passthrough : recur:FREQ=WEEKLY;BYDAY=TU,FR;UNTIL=20260925
@@ -62,6 +70,11 @@ RECURRENCE (recur: / repeat:)  → standard RFC 5545 RRULE
                      | count:5 | until:20260925 | until:eoy | until:eom
   e.g. every tuesday and friday for 7 weeks
        → FREQ=WEEKLY;BYDAY=TU,FR;COUNT=14
+  series model     : master = status:recurring, virtual tag +PARENT
+                     hidden from ls/list/next by default (show: `+PARENT`)
+  occurrences      : done <id> on:<date> → EXDATE (skip one)
+                     modify <id>.<n> … → RECURRENCE-ID override (same UID)
+                     expanded rows carry plain IDs; `done 5` targets one occurrence
 
 DATE-ONLY DUE (config-driven overdue)
   [date] due_date_overdue_today = false (default): overdue only after the day
@@ -72,8 +85,8 @@ FILTER GRAMMAR (shared by CLI args and report `filter`)
   type:todo | type:event | type:all        (+TODO / +EVENT aliases)
   source:work  -source:work                include / exclude a source
   due:<day> exact | due.before:<   strict < | due.by:<   <= | due.after:>=
-  status:pending|in-progress|completed|cancelled|active
-  +OVERDUE +PENDING +COMPLETED +CANCELLED +IN-PROCESS +TAGGED +UNTAGGED +SCHEDULED
+  status:pending|in-progress|completed|cancelled|recurring|active
+  +OVERDUE +PENDING +COMPLETED +CANCELLED +IN-PROCESS +TAGGED +UNTAGGED +SCHEDULED +PARENT
   +tag / -tag
   Composition: adjacent atoms = and; `and` binds tighter than `or`:
     A B or C D     = (A and B) or (C and D)
@@ -175,6 +188,7 @@ pub fn load_merged(conf: &Config, sources: &[Source]) -> Result<Vec<Row>> {
                 id: 0,
                 source: src.name.clone(),
                 task: t,
+                occ: None,
             });
         }
     }
@@ -188,6 +202,262 @@ pub fn load_merged(conf: &Config, sources: &[Source]) -> Result<Vec<Row>> {
         r.id = i + 1;
     }
     Ok(rows)
+}
+
+/// Like [`load_merged`], but with recurring series expanded into virtual
+/// occurrence rows (Taskwarrior-style). All rows — real and virtual — get
+/// sequential plain integer IDs; occurrence rows carry `occ` for `on:`/`id.n`
+/// addressing. Without the `recur-expand` feature this is just `load_merged`.
+pub fn load_merged_expanded(conf: &Config, sources: &[Source]) -> Result<Vec<Row>> {
+    #[cfg(feature = "recur-expand")]
+    {
+        let mut rows = load_merged(conf, sources)?;
+        expand_occurrences(&mut rows, conf);
+        Ok(rows)
+    }
+    #[cfg(not(feature = "recur-expand"))]
+    {
+        load_merged(conf, sources)
+    }
+}
+
+/// Expand recurring parents into virtual occurrence rows and renumber all
+/// rows sequentially (recur-expand).
+#[cfg(feature = "recur-expand")]
+fn expand_occurrences(rows: &mut Vec<Row>, conf: &Config) {
+    use crate::model::{Task, TaskStatus};
+    use crate::recur_expand::expand_task;
+    use chrono::{DateTime, Duration, Utc};
+    use std::collections::HashMap;
+
+    // Map overrides: parent_uid -> (recurrence_id -> task).
+    let mut overrides: HashMap<String, HashMap<DateTime<Utc>, Task>> = HashMap::new();
+    for r in rows.iter() {
+        if let (Some(pid), Some(rid)) = (&r.task.parent_uid, r.task.recurrence_id) {
+            overrides
+                .entry(pid.clone())
+                .or_default()
+                .insert(rid, r.task.clone());
+        }
+    }
+    // Override records are addressed via their parent's occurrence, not standalone.
+    rows.retain(|r| r.task.recurrence_id.is_none());
+
+    let now = Utc::now();
+    let after = now - Duration::days(1);
+    let before = now + Duration::days(366);
+    let mut extra: Vec<Row> = Vec::new();
+
+    for r in rows.iter() {
+        // Expand active series only (done/cancelled masters stop expanding).
+        if !r.task.is_parent() || r.task.status.is_done() {
+            continue;
+        }
+        let occs = expand_task(&r.task, after, before);
+        let occs: Vec<_> = if conf.defaults.recur_expand_count == 0 {
+            occs
+        } else {
+            occs
+                .into_iter()
+                .take(conf.defaults.recur_expand_count)
+                .collect()
+        };
+        let ovs = overrides.get(&r.task.uid);
+        for occ in occs {
+            let mut t = ovs
+                .and_then(|m| m.get(&occ.occurrence_start))
+                .cloned()
+                .unwrap_or_else(|| occ.master.clone());
+            // A virtual occurrence is a single active instance, not the template.
+            t.status = TaskStatus::Pending;
+            if t.is_event() {
+                let delta = occ.occurrence_start - t.dtstart.unwrap_or(occ.occurrence_start);
+                t.dtstart = Some(occ.occurrence_start);
+                t.dtend = t.dtend.map(|e| e + delta);
+            } else {
+                t.due = Some(occ.occurrence_start);
+            }
+            extra.push(Row {
+                id: r.id,
+                source: r.source.clone(),
+                task: t,
+                occ: Some(occ.index),
+            });
+        }
+    }
+    rows.extend(extra);
+    // Taskwarrior-style plain sequential IDs over the whole list.
+    for (i, r) in rows.iter_mut().enumerate() {
+        r.id = i + 1;
+    }
+}
+
+/// A resolved target that may address a single occurrence of a recurring series.
+pub struct OccurrenceTarget {
+    pub uid: String,
+    pub source: String,
+    /// Original DTSTART of the target occurrence (None = whole task/series).
+    pub occ_date: Option<DateTime<Utc>>,
+}
+
+/// Resolve ID arguments, including per-occurrence forms `id.n` and `on:<date>`.
+///
+/// `on:<date>` applies to every resolved id; `id.n` addresses the nth
+/// upcoming occurrence (1-based) of that parent series. Occurrence resolution
+/// requires the `recur-expand` feature.
+pub fn resolve_targets_occ(
+    conf: &Config,
+    override_: Option<&[String]>,
+    ids: &[String],
+    occ_date: Option<DateTime<Utc>>,
+) -> Result<Vec<OccurrenceTarget>> {
+    let sources = resolve_sources(conf, override_, ContextKind::Cli)?;
+    let rows = load_merged_expanded(conf, &sources)?;
+    let mut out = Vec::new();
+    for id in ids {
+        if let Some((pid, pn)) = id.rsplit_once('.') {
+            let parent_id: usize = pid.parse().map_err(|_| {
+                anyhow::anyhow!("bad occurrence ID `{id}` (expected `<id>.<n>`)")
+            })?;
+            let n: usize = pn
+                .parse()
+                .map_err(|_| anyhow::anyhow!("bad occurrence number `{id}` (expected `<id>.<n>`)"))?;
+            if n == 0 {
+                bail!("occurrence numbers are 1-based: `{id}`");
+            }
+            let row = rows
+                .get(parent_id.checked_sub(1).unwrap_or(usize::MAX))
+                .ok_or_else(|| anyhow::anyhow!("no task with ID `{parent_id}`"))?;
+            if !row.task.is_parent() {
+                bail!("task `{parent_id}` is not a recurring parent");
+            }
+            let occ = resolve_nth_occurrence(&row.task, n)?;
+            out.push(OccurrenceTarget {
+                uid: row.task.uid.clone(),
+                source: row.source.clone(),
+                occ_date: Some(occ),
+            });
+        } else if let Ok(n) = id.parse::<usize>() {
+            let row = rows
+                .get(n.checked_sub(1).unwrap_or(usize::MAX))
+                .ok_or_else(|| anyhow::anyhow!("no task with ID `{id}`"))?;
+            if row.occ.is_some() {
+                // A virtual occurrence row: target that single occurrence.
+                let occ = row
+                    .task
+                    .dtstart
+                    .or(row.task.due)
+                    .ok_or_else(|| anyhow::anyhow!("occurrence `{id}` has no date"))?;
+                out.push(OccurrenceTarget {
+                    uid: row.task.uid.clone(),
+                    source: row.source.clone(),
+                    occ_date: Some(occ),
+                });
+            } else {
+                let occ = match &occ_date {
+                    Some(d) => Some(resolve_occurrence_date(&row.task, *d)?),
+                    None => None,
+                };
+                out.push(OccurrenceTarget {
+                    uid: row.task.uid.clone(),
+                    source: row.source.clone(),
+                    occ_date: occ,
+                });
+            }
+        } else {
+            let found = rows
+                .iter()
+                .find(|r| r.task.uid == *id)
+                .ok_or_else(|| anyhow::anyhow!("no task with UID `{id}`"))?;
+            if found.occ.is_some() {
+                let occ = found
+                    .task
+                    .dtstart
+                    .or(found.task.due)
+                    .ok_or_else(|| anyhow::anyhow!("occurrence `{id}` has no date"))?;
+                out.push(OccurrenceTarget {
+                    uid: found.task.uid.clone(),
+                    source: found.source.clone(),
+                    occ_date: Some(occ),
+                });
+            } else {
+                let occ = match &occ_date {
+                    Some(d) => Some(resolve_occurrence_date(&found.task, *d)?),
+                    None => None,
+                };
+                out.push(OccurrenceTarget {
+                    uid: found.task.uid.clone(),
+                    source: found.source.clone(),
+                    occ_date: occ,
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Resolve the nth upcoming occurrence (1-based) of a recurring parent.
+pub fn resolve_nth_occurrence(t: &Task, n: usize) -> Result<DateTime<Utc>> {
+    #[cfg(feature = "recur-expand")]
+    {
+        let now = Utc::now();
+        let occs = crate::recur_expand::expand_task(
+            t,
+            now - Duration::days(1),
+            now + Duration::days(366),
+        );
+        occs.into_iter()
+            .find(|o| o.index == n)
+            .map(|o| o.occurrence_start)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "no occurrence `{n}` in the next year for recurring task `{}`",
+                    t.uid
+                )
+            })
+    }
+    #[cfg(not(feature = "recur-expand"))]
+    {
+        let _ = (t, n);
+        bail!("occurrence addressing requires the `recur-expand` feature")
+    }
+}
+
+/// Find the occurrence whose local day matches `date` (the `on:<date>` form).
+pub fn resolve_occurrence_date(t: &Task, date: DateTime<Utc>) -> Result<DateTime<Utc>> {
+    #[cfg(feature = "recur-expand")]
+    {
+        let now = Utc::now();
+        let day = date.with_timezone(&Local).date_naive();
+        let occs = crate::recur_expand::expand_task(
+            t,
+            now - Duration::days(1),
+            now + Duration::days(366),
+        );
+        occs.into_iter()
+            .find(|o| o.occurrence_start.with_timezone(&Local).date_naive() == day)
+            .map(|o| o.occurrence_start)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "no occurrence on `{day}` for recurring task `{}`",
+                    t.uid
+                )
+            })
+    }
+    #[cfg(not(feature = "recur-expand"))]
+    {
+        let _ = (t, date);
+        bail!("occurrence addressing requires the `recur-expand` feature")
+    }
+}
+
+/// Resolve a source name to its concrete `Source`, including composite
+/// `ics-dir` references (`remote/sorge` → virtual `ics` source).
+pub fn resolve_source(conf: &Config, name: &str) -> Result<Source> {
+    let mut resolved = source::resolve_source_name(&conf.sources, name)?;
+    resolved
+        .pop()
+        .ok_or_else(|| anyhow::anyhow!("unknown source `{name}`"))
 }
 
 /// Resolve ID arguments to `(uid, source_name)` pairs.
@@ -219,7 +489,7 @@ pub fn resolve_targets(
     Ok(out)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "storage-jsonl"))]
 mod tests {
     use super::*;
     use crate::config::{Config, SourceType};

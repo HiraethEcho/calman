@@ -7,10 +7,10 @@
 use crate::args::ParsedArgs;
 use crate::cli::open_storage;
 use crate::config::Config;
-use crate::date_parser::{
+use crate::date::{
     DateValue, local_midnight, parse_date_value, parse_duration, resolve_end,
 };
-use crate::model::Task;
+use crate::model::{Task, TaskStatus};
 use crate::source::resolve_source_name;
 use crate::storage::Storage;
 use anyhow::{Context, Result, bail};
@@ -50,6 +50,12 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         .as_deref()
         .map(crate::recurrence::normalize_recurrence)
         .transpose()?;
+    if let Some(st) = q.status {
+        task.status = st;
+    }
+    if task.rrule.is_some() && task.status.is_active() {
+        task.status = TaskStatus::Recurring;
+    }
     if let Some(rel) = &q.rel {
         let targets = crate::cli::resolve_targets(conf, None, std::slice::from_ref(rel))?;
         task.related_to = targets.first().map(|(uid, _)| uid.clone());

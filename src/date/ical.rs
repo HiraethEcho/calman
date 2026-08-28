@@ -1,13 +1,20 @@
-//! Natural-language date parsing.
+//! iCalendar-style compact date parsing (feature `date-ical`).
 //!
-//! Per DESIGN.md §6.1 and Taskwarrior named dates:
-//! keywords, period boundaries (`sod`/`eod`/`sow`/`eow`/...), weekdays,
-//! ISO/compact dates, and relative offsets. Dates assume system local time,
-//! converted to UTC for storage (CalDAV-compatible concrete timestamps).
+//! Per DESIGN.md §6.1 and Taskwarrior named dates, plus a `T`-marked compact
+//! form (RFC 5545 `YYYYMMDDTHHMMSS` style), where `T` separates date and time:
+//! `20260828T090000` is a full date-time; `20260828` (8 digits) is an all-day
+//! `YYYYMMDD`; `<8` digits (`0823`, `25`) are treated as the trailing digits of
+//! `YYYYMMDD` with the prefix filled from today (`0823`→2026-08-23, `25`→2026-08-25);
+//! `0828T0900`/`25T` use the digits before `T` as trailing date digits and the
+//! part after `T` as `HHMMSS`; `T0900`/`T09` use today's date plus `HHMMSS`
+//! (zero-padded, `T` alone → today 00:00). Also accepted: `YYYY-MM-DD`,
+//! `YYYY-MM-DD HH:MM`, `HH:MM` (today), `now`, named day boundaries, and
+//! relative `+3d`/`-2w`/`+1h`. All-local input is resolved to UTC via
+//! `local_to_utc` (DST-safe, CalDAV-safe).
 
 use anyhow::{Result, bail};
 use chrono::{
-    DateTime, Datelike, Duration, Local, Months, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc,
+    DateTime, Datelike, Duration, Local, LocalResult, Months, NaiveDate, NaiveDateTime, NaiveTime, Utc,
 };
 
 /// A parsed date: date-only (all-day candidate) or a concrete date-time.
@@ -27,10 +34,6 @@ pub fn parse_datetime(input: &str) -> Result<DateTime<Utc>> {
 }
 
 /// Parse a date expression, distinguishing date-only from date-time forms.
-///
-/// Forms: `20260812` (all-day), `20260826-0900`, `0826` (this year),
-/// `17` (this month), `-0900` (today), `YYYY-MM-DD [HH:MM]`, `HH:MM`,
-/// named dates, relative offsets.
 pub fn parse_date_value(input: &str) -> Result<DateValue> {
     let s = input.trim().to_lowercase();
     let now = Local::now();
@@ -64,19 +67,7 @@ pub fn parse_date_value(input: &str) -> Result<DateValue> {
         return Ok(DateValue::Time(dt));
     }
 
-    // `-HHMM` → today at that time
-    if let Some(t) = s.strip_prefix('-')
-        && t.len() == 4
-        && t.chars().all(|c| c.is_ascii_digit())
-    {
-        let d = now.date_naive();
-        let ndt = d
-            .and_hms_opt(t[..2].parse()?, t[2..].parse()?, 0)
-            .ok_or_else(|| anyhow::anyhow!("bad time `{input}`"))?;
-        return Ok(DateValue::Time(local_to_utc(ndt)));
-    }
-
-    // Relative offsets: +3d, -2w, +1m, +1y, +2h (against now)
+    // Relative offsets: +3d, -2w, +1m, +1y, +2h, -1s (against now)
     if let Some(rest) = s.strip_prefix(['+', '-']) {
         let unit = rest.chars().last().unwrap_or('d');
         if !unit.is_ascii_digit()
@@ -102,80 +93,29 @@ pub fn parse_date_value(input: &str) -> Result<DateValue> {
         return Ok(DateValue::Time(local_to_utc(ndt)));
     }
 
-    // "YYYYMMDD-HHMM"
-    if let Some((d, t)) = s.split_once('-')
-        && d.len() == 8
-        && t.len() == 4
-        && d.chars().all(|c| c.is_ascii_digit())
-        && t.chars().all(|c| c.is_ascii_digit())
-    {
-        let date = NaiveDate::parse_from_str(d, "%Y%m%d")?;
-        let ndt = date
-            .and_hms_opt(t[..2].parse()?, t[2..].parse()?, 0)
-            .ok_or_else(|| anyhow::anyhow!("bad time `{input}`"))?;
-        return Ok(DateValue::Time(local_to_utc(ndt)));
+    // T-based / compact forms.
+    if let Some(idx) = s.find('t') {
+        let before = &s[..idx];
+        let after = &s[idx + 1..];
+        let date = resolve_compact_date(before, now)?;
+        let time = resolve_compact_time(after)?;
+        return Ok(DateValue::Time(local_to_utc(date.and_time(time))));
     }
 
-    // "MMDD-HHMM" → this year (e.g. 0826-0930)
-    if let Some((d, t)) = s.split_once('-')
-        && d.len() == 4
-        && t.len() == 4
-        && d.chars().all(|c| c.is_ascii_digit())
-        && t.chars().all(|c| c.is_ascii_digit())
-    {
-        let m: u32 = d[..2].parse()?;
-        let day: u32 = d[2..].parse()?;
-        if let Some(date) = NaiveDate::from_ymd_opt(now.year(), m, day) {
-            let ndt = date
-                .and_hms_opt(t[..2].parse()?, t[2..].parse()?, 0)
-                .ok_or_else(|| anyhow::anyhow!("bad time `{input}`"))?;
-            return Ok(DateValue::Time(local_to_utc(ndt)));
+    // Digits only, no T.
+    if !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) {
+        if s.len() == 8 {
+            let d = NaiveDate::parse_from_str(&s, "%Y%m%d")?;
+            return Ok(DateValue::Date(d));
         }
-    }
-
-    // "DD-HHMM" → this year, this month (e.g. 25-0930)
-    if let Some((d, t)) = s.split_once('-')
-        && d.len() <= 2
-        && t.len() == 4
-        && d.chars().all(|c| c.is_ascii_digit())
-        && t.chars().all(|c| c.is_ascii_digit())
-    {
-        let day: u32 = d.parse()?;
-        if let Some(date) = NaiveDate::from_ymd_opt(now.year(), now.month(), day) {
-            let ndt = date
-                .and_hms_opt(t[..2].parse()?, t[2..].parse()?, 0)
-                .ok_or_else(|| anyhow::anyhow!("bad time `{input}`"))?;
-            return Ok(DateValue::Time(local_to_utc(ndt)));
-        }
+        // <8 digits → trailing digits of YYYYMMDD, prefix filled from today.
+        let d = resolve_compact_date(&s, now)?;
+        return Ok(DateValue::Date(d));
     }
 
     // "YYYY-MM-DD"
     if let Ok(d) = NaiveDate::parse_from_str(&s, "%Y-%m-%d") {
         return Ok(DateValue::Date(d));
-    }
-
-    // "YYYYMMDD"
-    if let Ok(d) = NaiveDate::parse_from_str(&s, "%Y%m%d") {
-        return Ok(DateValue::Date(d));
-    }
-
-    let is_digits = |x: &str| !x.is_empty() && x.chars().all(|c| c.is_ascii_digit());
-
-    // "MMDD" → this year
-    if s.len() == 4 && is_digits(&s) {
-        let m: u32 = s[..2].parse()?;
-        let d: u32 = s[2..].parse()?;
-        if let Some(date) = NaiveDate::from_ymd_opt(now.year(), m, d) {
-            return Ok(DateValue::Date(date));
-        }
-    }
-
-    // "DD" → this year, this month
-    if s.len() <= 2 && is_digits(&s) {
-        let d: u32 = s.parse()?;
-        if let Some(date) = NaiveDate::from_ymd_opt(now.year(), now.month(), d) {
-            return Ok(DateValue::Date(date));
-        }
     }
 
     // "HH:MM" → today at that time
@@ -184,7 +124,38 @@ pub fn parse_date_value(input: &str) -> Result<DateValue> {
         return Ok(DateValue::Time(local_to_utc(ndt)));
     }
 
-    bail!("could not parse date `{input}` (try 20260812, 0826, -0900, today, eow, +3d)")
+    bail!("could not parse date `{input}` (try 20260812, 0826, T0900, today, eow, +3d)")
+}
+
+/// Resolve a compact date string to a `NaiveDate`.
+/// - empty → today
+/// - >=8 digits → first 8 as `YYYYMMDD`
+/// - <8 digits → trailing digits of today's `YYYYMMDD` (prefix from today)
+fn resolve_compact_date(digits: &str, now: DateTime<Local>) -> Result<NaiveDate> {
+    if digits.is_empty() {
+        return Ok(now.date_naive());
+    }
+    if digits.len() >= 8 {
+        return Ok(NaiveDate::parse_from_str(&digits[..8], "%Y%m%d")?);
+    }
+    let today = now.format("%Y%m%d").to_string();
+    let n = digits.len();
+    let prefix = &today[..8 - n];
+    let full = format!("{prefix}{digits}");
+    Ok(NaiveDate::parse_from_str(&full, "%Y%m%d")?)
+}
+
+/// Resolve a compact time string to a `NaiveTime`.
+/// Digits are `HH[MM[SS]]` (left-aligned, zero-padded): `09`→09:00:00,
+/// `0930`→09:30:00, `090000`→full, empty→00:00:00.
+fn resolve_compact_time(digits: &str) -> Result<NaiveTime> {
+    if digits.is_empty() {
+        return Ok(NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+    }
+    let hh = digits.get(..2).and_then(|x| x.parse::<u32>().ok()).unwrap_or(0);
+    let mm = digits.get(2..4).and_then(|x| x.parse::<u32>().ok()).unwrap_or(0);
+    let ss = digits.get(4..6).and_then(|x| x.parse::<u32>().ok()).unwrap_or(0);
+    NaiveTime::from_hms_opt(hh, mm, ss).ok_or_else(|| anyhow::anyhow!("bad time `{digits}`"))
 }
 
 /// Parse a human duration: `45min`, `1h`, `1h30m`, `2d`, `90`, `1w`.
@@ -193,6 +164,9 @@ pub fn parse_duration(input: &str) -> Result<Duration> {
     let s = input.trim().to_lowercase();
     if s.is_empty() {
         bail!("empty duration");
+    }
+    if let Some(d) = parse_iso_duration(&s) {
+        return Ok(d);
     }
     let mut parts: Vec<(String, String)> = Vec::new();
     let mut num = String::new();
@@ -209,11 +183,8 @@ pub fn parse_duration(input: &str) -> Result<Duration> {
     }
     if !num.is_empty() {
         parts.push((num, unit));
-    } else if !parts.is_empty() {
-        // trailing unit after a completed part
-        if let Some(last) = parts.last_mut() {
-            last.1 = unit;
-        }
+    } else if let Some(last) = parts.last_mut() {
+        last.1 = unit;
     }
     if parts.is_empty() {
         bail!("could not parse duration `{input}` (try 45min, 1h, 1h30m, 2d)");
@@ -234,6 +205,36 @@ pub fn parse_duration(input: &str) -> Result<Duration> {
         total += d;
     }
     Ok(total)
+}
+
+/// Parse an ISO 8601 duration (`PT15M`, `PT1H30M`, `P7D`, `P2W`, `PT45S`).
+/// Supported units: D/W (date part), H/M/S (time part). `M` is minutes.
+fn parse_iso_duration(s: &str) -> Option<Duration> {
+    let body = s.strip_prefix('p')?;
+    let mut total = Duration::zero();
+    let mut num = String::new();
+    let mut any = false;
+    for ch in body.chars() {
+        if ch.is_ascii_digit() {
+            num.push(ch);
+        } else if ch == 't' {
+            num.clear();
+        } else {
+            let n: i64 = num.parse().ok()?;
+            let d = match ch {
+                'd' => Duration::days(n),
+                'w' => Duration::weeks(n),
+                'h' => Duration::hours(n),
+                'm' => Duration::minutes(n),
+                's' => Duration::seconds(n),
+                _ => return None,
+            };
+            total += d;
+            num.clear();
+            any = true;
+        }
+    }
+    any.then_some(total)
 }
 
 /// Named dates. Week starts Monday (calman default); `eoww` uses 17:00.
@@ -283,11 +284,14 @@ fn named_date(s: &str) -> Option<DateTime<Utc>> {
             week_start + Duration::days(6),
             (23, 59, 59),
         ),
-        "eoww" => (
-            week_start + Duration::days(4),
-            week_start + Duration::days(4),
-            (17, 0, 0),
-        ),
+        "eoww" => {
+            let (hh, mm) = super::workweek_end();
+            (
+                week_start + Duration::days(4),
+                week_start + Duration::days(4),
+                (hh, mm, 0),
+            )
+        }
         "sonw" | "sonww" => (
             week_start + Duration::days(7),
             week_start + Duration::days(7),
@@ -377,12 +381,11 @@ fn monday_of(d: NaiveDate) -> NaiveDate {
 }
 
 /// Convert a naive local `NaiveDateTime` to UTC, resolving DST ambiguity/gaps.
-fn local_to_utc(ndt: NaiveDateTime) -> DateTime<Utc> {
-    Local
-        .from_local_datetime(&ndt)
-        .single()
-        .unwrap_or_else(|| Local.from_utc_datetime(&ndt))
-        .with_timezone(&Utc)
+pub fn local_to_utc(ndt: NaiveDateTime) -> DateTime<Utc> {
+    match ndt.and_local_timezone(Local) {
+        LocalResult::Single(dt) | LocalResult::Ambiguous(dt, _) => dt.with_timezone(&Utc),
+        LocalResult::None => ndt.and_utc(),
+    }
 }
 
 /// Local midnight of `d` as UTC (used for all-day storage).
@@ -433,11 +436,81 @@ mod tests {
     }
 
     #[test]
-    fn compact_date_parses() {
-        let d = parse_datetime("20260824").unwrap();
+    fn compact_t_date_parses() {
+        let d = parse_date_value("20260828T090000").unwrap();
+        let t = match d {
+            DateValue::Time(dt) => dt.with_timezone(&Local),
+            _ => panic!("expected time"),
+        };
+        assert_eq!(t.year(), 2026);
+        assert_eq!(t.month(), 8);
+        assert_eq!(t.day(), 28);
+        assert_eq!(t.hour(), 9);
+        assert_eq!(t.minute(), 0);
+    }
+
+    #[test]
+    fn trailing_digits_fill_from_today() {
+        let now = Local::now();
+        // 0823 → MMDD this year
+        let d = resolve_compact_date("0823", Local::now()).unwrap();
+        assert_eq!(d, NaiveDate::from_ymd_opt(now.year(), 8, 23).unwrap());
+        // 25 → DD this month
+        let d = resolve_compact_date("25", Local::now()).unwrap();
         assert_eq!(
-            d.with_timezone(&Local).date_naive(),
-            NaiveDate::from_ymd_opt(2026, 8, 24).unwrap()
+            d,
+            NaiveDate::from_ymd_opt(now.year(), now.month(), 25).unwrap()
+        );
+        // 260823 → YYMMDD
+        let d = resolve_compact_date("260823", Local::now()).unwrap();
+        assert_eq!(d, NaiveDate::from_ymd_opt(2026, 8, 23).unwrap());
+    }
+
+    #[test]
+    fn t_prefix_is_today() {
+        let now = Local::now();
+        let d = parse_date_value("T09").unwrap();
+        let t = match d {
+            DateValue::Time(dt) => dt.with_timezone(&Local),
+            _ => panic!(),
+        };
+        assert_eq!(t.date_naive(), now.date_naive());
+        assert_eq!(t.hour(), 9);
+        assert_eq!(t.minute(), 0);
+        assert_eq!(t.second(), 0);
+        // T alone → midnight today
+        let d = parse_date_value("T").unwrap();
+        let t = match d {
+            DateValue::Time(dt) => dt.with_timezone(&Local),
+            _ => panic!(),
+        };
+        assert_eq!(t.date_naive(), now.date_naive());
+        assert_eq!(t.hour(), 0);
+    }
+
+    #[test]
+    fn t_after_trailing_date() {
+        let now = Local::now();
+        // 25T0930 → 25th of this month at 09:30
+        let d = parse_date_value("25T0930").unwrap();
+        let t = match d {
+            DateValue::Time(dt) => dt.with_timezone(&Local),
+            _ => panic!(),
+        };
+        assert_eq!(
+            t.date_naive(),
+            NaiveDate::from_ymd_opt(now.year(), now.month(), 25).unwrap()
+        );
+        assert_eq!(t.hour(), 9);
+        assert_eq!(t.minute(), 30);
+    }
+
+    #[test]
+    fn eight_digits_is_allday() {
+        let d = parse_date_value("20260824").unwrap();
+        assert_eq!(
+            d,
+            DateValue::Date(NaiveDate::from_ymd_opt(2026, 8, 24).unwrap())
         );
     }
 
@@ -450,18 +523,15 @@ mod tests {
             sow.with_timezone(&Local).weekday().num_days_from_monday(),
             0
         );
-
         let eoww = parse_datetime("eoww").unwrap();
         assert_eq!(eoww.with_timezone(&Local).hour(), 17);
         assert_eq!(
             eoww.with_timezone(&Local).weekday().num_days_from_monday(),
             4
-        ); // Friday
-
+        );
         let eom = parse_datetime("eom").unwrap();
         let ld = eom.with_timezone(&Local).date_naive();
         assert_eq!(ld.day(), last_day(ld.year(), ld.month()));
-
         let et = parse_datetime("eond").unwrap().with_timezone(&Local);
         let tm = parse_datetime("tomorrow").unwrap().with_timezone(&Local);
         assert_eq!(et.date_naive(), tm.date_naive());
@@ -479,51 +549,6 @@ mod tests {
     }
 
     #[test]
-    fn date_only_and_compact_forms() {
-        let now = Local::now();
-        // MMDD → this year
-        let d = parse_date_value("0826").unwrap();
-        assert_eq!(
-            d,
-            DateValue::Date(NaiveDate::from_ymd_opt(now.year(), 8, 26).unwrap())
-        );
-        // DD → this month
-        let d = parse_date_value("17").unwrap();
-        assert_eq!(
-            d,
-            DateValue::Date(NaiveDate::from_ymd_opt(now.year(), now.month(), 17).unwrap())
-        );
-        // -0900 → today 09:00
-        let d = parse_date_value("-0900").unwrap();
-        let t = match d {
-            DateValue::Time(dt) => dt.with_timezone(&Local),
-            _ => panic!(),
-        };
-        assert_eq!(t.date_naive(), now.date_naive());
-        assert_eq!(t.hour(), 9);
-        // YYYYMMDD-HHMM
-        let d = parse_date_value("20260826-0900").unwrap();
-        assert!(matches!(d, DateValue::Time(_)));
-        // DD-HHMM → this month day 25 at 09:30
-        let d = parse_date_value("25-0930").unwrap();
-        match d {
-            DateValue::Time(dt) => {
-                let t = dt.with_timezone(&Local);
-                assert_eq!(
-                    t.date_naive(),
-                    NaiveDate::from_ymd_opt(now.year(), now.month(), 25).unwrap()
-                );
-                assert_eq!(t.hour(), 9);
-                assert_eq!(t.minute(), 30);
-            }
-            _ => panic!("expected time"),
-        }
-        // MMDD-HHMM → this year
-        let d = parse_date_value("0826-0930").unwrap();
-        assert!(matches!(d, DateValue::Time(_)));
-    }
-
-    #[test]
     fn durations() {
         assert_eq!(parse_duration("45min").unwrap(), Duration::minutes(45));
         assert_eq!(parse_duration("1h").unwrap(), Duration::hours(1));
@@ -531,6 +556,15 @@ mod tests {
         assert_eq!(parse_duration("2d").unwrap(), Duration::days(2));
         assert_eq!(parse_duration("90").unwrap(), Duration::minutes(90));
         assert!(parse_duration("bogus").is_err());
+    }
+
+    #[test]
+    fn iso_durations() {
+        assert_eq!(parse_duration("PT15M").unwrap(), Duration::minutes(15));
+        assert_eq!(parse_duration("PT1H30M").unwrap(), Duration::minutes(90));
+        assert_eq!(parse_duration("P7D").unwrap(), Duration::days(7));
+        assert_eq!(parse_duration("P2W").unwrap(), Duration::weeks(2));
+        assert_eq!(parse_duration("pt45s").unwrap(), Duration::seconds(45));
     }
 
     #[test]

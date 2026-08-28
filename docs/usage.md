@@ -45,8 +45,8 @@ error), otherwise to `[defaults].write_source`.
 ```sh
 calman add "buy milk" due:tomorrow pri:H +home
 calman add "standup" start:tomorrow recur:daily          # event, daily
-calman add "lunch" start:today-1200 duration:45min +team
-calman add "review" start:2026-09-01 end:2026-09-01T15:00 source:work
+calman add "lunch" start:T1200 duration:45min +team
+calman add "review" start:2026-09-01 end:2026-09-01 15:00 source:work
 ```
 
 See [Tasks & events](tasks.md) for the full attribute table.

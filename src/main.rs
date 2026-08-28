@@ -5,7 +5,7 @@
 mod args;
 mod cli;
 mod config;
-mod date_parser;
+mod date;
 mod filter;
 mod model;
 mod recurrence;
@@ -13,6 +13,9 @@ mod report;
 mod source;
 mod storage;
 mod sync;
+
+#[cfg(feature = "recur-expand")]
+mod recur_expand;
 
 use args::{Command, parse};
 use clap::Parser;
@@ -43,6 +46,7 @@ fn main() {
 fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let conf = config::Config::load()?;
+    crate::date::set_workweek_end(&conf.date.workweek_end);
     let q = parse(&cli.args)?;
 
     match q.cmd {
@@ -66,7 +70,5 @@ fn run() -> anyhow::Result<()> {
         }
         #[cfg(feature = "tui")]
         Some(Command::Tui) => cli::tui::run(),
-        #[cfg(not(feature = "tui"))]
-        Some(Command::Tui) => anyhow::bail!("this build does not include the `tui` feature"),
     }
 }

@@ -7,7 +7,7 @@
 //! - `calman +OVERDUE list`
 //! - `calman count status:pending`
 
-use crate::date_parser::{DateValue, local_midnight, parse_date_value};
+use crate::date::{DateValue, local_midnight, parse_date_value};
 use crate::model::{TaskStatus, priority_from_str};
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
@@ -22,6 +22,7 @@ pub enum Command {
     Modify,
     Count,
     Sync,
+    #[cfg(feature = "tui")]
     Tui,
     Help,
 }
@@ -51,6 +52,8 @@ pub struct ParsedArgs {
     pub tags: Vec<String>,
     pub anti_tags: Vec<String>,
     pub rel: Option<String>,
+    /// Occurrence addressing: original DTSTART of the target occurrence (`on:<date>`).
+    pub occ_date: Option<DateTime<Utc>>,
     /// `rc.report.<name>.<key>=<value>` tokens (e.g. columns/labels).
     pub rc_reports: Vec<RcReport>,
     /// Raw filter tokens (post-command, non-rc, non-id) for list/count.
@@ -83,6 +86,7 @@ fn is_attr_token(t: &str) -> bool {
     let l = t.to_ascii_lowercase();
     l.starts_with("rc.")
         || l.starts_with("source:")
+        || l.starts_with("src:")
         || l.starts_with("due:")
         || l.starts_with("start:")
         || l.starts_with("end:")
@@ -168,9 +172,15 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
             continue;
         }
 
-        if !ids_exhausted && tok.parse::<usize>().is_ok() {
-            q.ids.push(tok.clone());
-            continue;
+        if !ids_exhausted {
+            let is_occurrence_id = tok
+                .split_once('.')
+                .map(|(a, b)| a.parse::<usize>().is_ok() && b.parse::<usize>().is_ok())
+                .unwrap_or(false);
+            if tok.parse::<usize>().is_ok() || is_occurrence_id {
+                q.ids.push(tok.clone());
+                continue;
+            }
         }
 
         q.filter_tokens.push(tok.clone());
@@ -180,9 +190,12 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
             .or_else(|| lower.strip_prefix("pri:"))
         {
             q.priority = Some(parse_priority(rest)?);
-        } else if tok.len() > 7 && tok[..7].eq_ignore_ascii_case("source:") {
+        } else if tok.get(..7).is_some_and(|s| s.eq_ignore_ascii_case("source:")) {
             q.sources
                 .extend(tok[7..].split(',').map(|s| s.trim().to_string()));
+        } else if tok.get(..4).is_some_and(|s| s.eq_ignore_ascii_case("src:")) {
+            q.sources
+                .extend(tok[4..].split(',').map(|s| s.trim().to_string()));
         } else if let Some(rest) = lower.strip_prefix("due:") {
             let dv = parse_date_value(rest)?;
             let dtv = match dv {
@@ -198,6 +211,12 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
             if rest != "active" {
                 q.status = Some(parse_status(rest)?);
             }
+        } else if let Some(rest) = lower.strip_prefix("on:") {
+            let dv = parse_date_value(rest)?;
+            q.occ_date = Some(match dv {
+                DateValue::Date(d) => local_midnight(d),
+                DateValue::Time(dt) => dt,
+            });
         } else if let Some(rest) = lower.strip_prefix("rel:") {
             q.rel = Some(rest.to_string());
         } else if let Some(rest) = lower.strip_prefix("start:") {
@@ -275,6 +294,8 @@ fn is_filter_only_plus(name: &str) -> bool {
             | "scheduled"
             | "todo"
             | "event"
+            | "parent"
+            | "recurring"
     )
 }
 
@@ -299,6 +320,8 @@ fn is_filter_only_minus(name: &str) -> bool {
             | "scheduled"
             | "todo"
             | "event"
+            | "parent"
+            | "recurring"
     ) || l.starts_with("status:")
         || l.starts_with("source:")
         || l.starts_with("type:")
@@ -339,6 +362,7 @@ fn command_word(tok: &str) -> Option<(Command, Option<String>)> {
         "modify" | "mod" => (Command::Modify, None),
         "count" => (Command::Count, None),
         "sync" => (Command::Sync, None),
+        #[cfg(feature = "tui")]
         "tui" => (Command::Tui, None),
         "help" | "filters" => (Command::Help, None),
         _ => return None,
@@ -358,6 +382,7 @@ fn parse_status(v: &str) -> Result<TaskStatus> {
         }
         "completed" | "done" => TaskStatus::Completed,
         "cancelled" | "canceled" => TaskStatus::Cancelled,
+        "recurring" => TaskStatus::Recurring,
         _ => bail!("unknown status `{v}`"),
     })
 }
@@ -416,7 +441,7 @@ mod tests {
         let q = p(&[
             "add",
             "Meet",
-            "start:0826-0900",
+            "start:0826T0900",
             "duration:45min",
             "alert:15min",
             "+team",
@@ -429,7 +454,7 @@ mod tests {
 
     #[test]
     fn dur_alias() {
-        let q = p(&["add", "x", "start:25-0930", "dur:1h"]);
+        let q = p(&["add", "x", "start:25T0930", "dur:1h"]);
         assert_eq!(q.duration.as_deref(), Some("1h"));
     }
 

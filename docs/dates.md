@@ -42,7 +42,7 @@ These resolve to a calendar day boundary and therefore create all-day items:
 | `sopm` | start of previous month (00:00) |
 | `sopy` | start of previous year (00:00) |
 
-The week starts on **Monday** (`[date].week_start`, default `monday`).
+The week starts on **Monday** (`sow`/`eow`, `soww`/`eoww`).
 
 ## Named dates (with time)
 
@@ -54,7 +54,7 @@ These carry a time-of-day and produce **timed** items:
 | `eod` | end of today (23:59:59) |
 | `eond` | end of next day (tomorrow 23:59:59) |
 | `eow` | end of this week (Sunday 23:59:59) |
-| `eoww` | end of the working week (**Friday 17:00**) |
+| `eoww` | end of the working week (**Friday `[date].workweek_end`**, default 17:00) |
 | `eonw`, `eonww` | end of next week (next Sunday 23:59:59) |
 | `eopw`, `eopww` | end of previous week (prev Sunday 23:59:59) |
 | `eom` | end of this month (last day, 23:59:59) |
@@ -94,17 +94,17 @@ calman add "standup" start:+2h
 | Compact date | `20260826` | date-only (all-day) |
 | Compact this year | `0826` | Aug 26 this year, date-only |
 | Compact this month | `17` | 17th of this month, date-only |
-| Compact date+time | `20260826-0900` | Aug 26 2026, 09:00 |
-| Month-day+time | `0826-0930` | Aug 26 this year, 09:30 |
-| Day+time this month | `25-0930` | 25th this month, 09:30 |
-| Today at time | `-0900` | today 09:00 |
+| Compact date+time | `20260826T090000` | Aug 26 2026, 09:00 |
+| Month-day+time | `0826T0930` | Aug 26 this year, 09:30 |
+| Day+time this month | `25T0930` | 25th this month, 09:30 |
+| Today at time | `T0900` | today 09:00 |
 | Time only | `14:30` | today at 14:30 |
 
 ```sh
 calman add "release" due:2026-09-01
 calman add "call" start:2026-08-26 15:00
-calman add "dentist" start:0826-0930
-calman add "coffee" start:-0900
+calman add "dentist" start:0826T0930
+calman add "coffee" start:T0900
 calman add "wrap up" due:17          # 17th of this month, all-day
 ```
 
@@ -113,7 +113,8 @@ calman add "wrap up" due:17          # 17th of this month, all-day
 - Times are **24-hour** `HH:MM`. The parser does **not** currently accept
   `2pm`-style clocks or bare weekday names (e.g. `monday`, `fri+1`); use the
   named periods above (`sow`/`eow`, …) or explicit dates instead.
-- `eoww` (end of working week) is computed as **Friday 17:00**.
+- `eoww` (end of working week) is computed as **Friday `[date].workweek_end`**
+  (default `17:00`, format `HH:MM` or `HHMM`).
 - All-day `due`/`start` lands at local midnight; timed values keep their
   wall-clock time and are converted to UTC for storage.
 

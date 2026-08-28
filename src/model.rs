@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 pub enum TaskStatus {
     Pending,
     InProgress,
+    Recurring,
     Completed,
     Cancelled,
 }
@@ -21,9 +22,14 @@ impl TaskStatus {
         matches!(self, Self::Completed | Self::Cancelled)
     }
 
-    /// `Pending` and `InProgress` are active.
+    /// `Pending` and `InProgress` are active (recurring is its own state).
     pub fn is_active(&self) -> bool {
-        !self.is_done()
+        !self.is_done() && !self.is_recurring()
+    }
+
+    /// A recurring template is its own state.
+    pub fn is_recurring(&self) -> bool {
+        matches!(self, Self::Recurring)
     }
 }
 
@@ -70,6 +76,16 @@ pub struct Task {
 
     // Relations.
     pub related_to: Option<String>,
+    /// Recurrence exceptions (RFC 5545).
+    /// `exdates`: occurrence original `DTSTART`s excluded from the series (delete-one).
+    #[serde(default)]
+    pub exdates: Vec<DateTime<Utc>>,
+    /// For an override instance: the original occurrence `DTSTART` it replaces.
+    #[serde(default)]
+    pub recurrence_id: Option<DateTime<Utc>>,
+    /// For an override instance: UID of the master series it belongs to.
+    #[serde(default)]
+    pub parent_uid: Option<String>,
 
     // Timestamps.
     pub created_at: DateTime<Utc>,
@@ -80,6 +96,11 @@ impl Task {
     /// A task with a `dtstart` is an event; otherwise a todo.
     pub fn is_event(&self) -> bool {
         self.dtstart.is_some()
+    }
+
+    /// The task is a recurring series master (has `rrule`, is not an override).
+    pub fn is_parent(&self) -> bool {
+        self.rrule.is_some() && self.recurrence_id.is_none()
     }
 
     /// Create a brand-new task with generated UID and timestamps.
@@ -103,6 +124,9 @@ impl Task {
             allday: false,
             alarm_before: None,
             related_to: None,
+            exdates: Vec::new(),
+            recurrence_id: None,
+            parent_uid: None,
             created_at: now,
             updated_at: now,
         }

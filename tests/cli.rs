@@ -1,4 +1,5 @@
 //! End-to-end CLI tests: filter grammar, rc report overrides, default reports.
+#![cfg(feature = "storage-jsonl")]
 
 use std::process::Command;
 use tempfile::tempdir;
@@ -139,7 +140,7 @@ fn modify_date_only_start_becomes_allday() {
     let dir = tempdir().unwrap();
     let home = dir.path();
     // Default config writes to the `work` jsonl source.
-    assert!(calman(home, &["add", "evt", "start:-0900", "dur:1h"]).1);
+    assert!(calman(home, &["add", "evt", "start:T0900", "dur:1h"]).1);
     let (out, _) = calman(home, &["list"]);
     let id = strip_ansi(&out)
         .lines()

@@ -17,15 +17,13 @@ sync = ["work"]                 # Sources for `sync` by default
 tui = ["work", "personal"]      # Sources shown when `tui` starts
 
 [date]
-workweek_end = "17:00"          # Reserved: `eoww` is currently hardcoded to Friday 17:00
-week_start = "monday"           # Reserved: the week currently always starts on Monday
+workweek_end = "17:00"          # `eoww` = Friday HH:MM (configurable)
+default_event_duration = "1h"
+due_date_overdue_today = false
 
 [tui]
 default_filter = "all"          # "todo" | "event" | "all"
 vim_keys = true                 # true = Vim style (j/k/gg/G), false = arrow keys
-
-[locale]
-language = "en"                 # en | zh-CN
 
 [[source]]
 name = "work"                   # Unique name
@@ -185,13 +183,22 @@ calman modify <TEXT> [ATTRS...] # bare text replaces the summary
     - Date‑only `due:` (Todo) is an all‑day todo: stored as `DUE;VALUE=DATE` and
       `task.allday = true`; overdue rule from `[date] due_date_overdue_today`.
     - `recur:`/`repeat:` is normalized to a standard RFC 5545 `RRULE` by
-      `recurrence.rs`: raw `FREQ=…` passthrough, or friendly `daily/weekly/
-      monthly/yearly`, `every 7d`/`2 weeks` (→`INTERVAL`), `every tue and fri`/
-      `weekend` (→`BYDAY`), `for 5 times`/`for 7 weeks` (weeks×weekday→`COUNT`),
-      `count:N`, `until:<date>`/`until:eoy`/`until:eom`.
+      `recurrence.rs`: raw `FREQ=…` passthrough (always), `text2rrule` natural
+      language (`every tuesday`) under `date-natural`, or the built-in friendly
+      grammar (`daily/weekly/monthly/yearly`, `every 7d`/`2 weeks` (→`INTERVAL`),
+      `every tue and fri`/`weekend` (→`BYDAY`), `for 5 times`/`for 7 weeks`
+      (weeks×weekday→`COUNT`), `count:N`, `until:<date>`/`until:eoy`/`until:eom`).
+    - A task with `rrule` is the series **master**: `status = recurring`, virtual
+      tag `+PARENT`, hidden from `ls`/`list`/`next` by default; `done` on master
+      ⇒ `cancelled`; `modify`/`delete` target the master record.
+    - Optional `recur-expand` feature: `list`/`next` expand masters into virtual
+      occurrence rows (`⟳ 2. Sep 01 08:00 standup`); occurrences addressed via
+      `on:<date>` or `<id>.<n>`. `done`/`delete` on an occurrence ⇒ `EXDATE`;
+      `modify` on an occurrence ⇒ sibling component with same `UID` +
+      `RECURRENCE-ID` (iOS Calendar compatible).
     - No `end:`/`duration:` → `[date] default_event_duration` (default `1h`); all‑day with no end → single day (no `DTEND`).
 
-**Date input forms** (start/end/due): `20260812` (all‑day), `20260826-0900`, `0826` (this year), `17` (this month), `-0900` (today), `YYYY-MM-DD [HH:MM]`, named dates, `+3d`.
+**Date input forms** (start/end/due): `20260812` (all‑day), `20260812T090000`, `0826T0900` (this year, trailing‑fill), `T0900` (today), `0826` (this year), `25` (this month, trailing‑fill), `YYYY-MM-DD [HH:MM]`, `HH:MM` (today), named dates, `+3d` / `-2w`.
 
 #### B. `list` — Long list report
 - **Syntax**: `calman [FILTERS...] [list]`
@@ -199,7 +206,7 @@ calman modify <TEXT> [ATTRS...] # bare text replaces the summary
 - **Output**: Table with a dynamic short ID per row (numbered across all selected sources). No `--format` flag.
 - **Filters**: shared expression grammar with `[report]` `filter` strings.
     - `and` / `or` / `(` / `)`; implicit `and` between adjacent atoms.
-    - `status:<status>`: `pending`, `in‑progress`, `completed`, `cancelled`, `active`
+    - `status:<status>`: `pending`, `in‑progress`, `completed`, `cancelled`, `recurring`, `active`
     - `type:<type>`: `todo` | `event` | `all`; `+todo`/`+event` aliases
     - `source:<name>`; `-source:<name>` excludes a source
     - `priority:<level>`: `high`/`h`/`9`, `medium`/`m`/`5`, `low`/`l`/`1`, or 0‑9
@@ -352,7 +359,9 @@ Updated:    2026-08-22 09:15
 - **Absolute**: `2026-08-25`, `08/25/2026`, `2026-08-25 14:30`.
 - **Relative offsets**: `+3d` (3 days later), `-2w` (2 weeks ago), `+1m` (1 month), `+1y` (1 year).
 - **Keywords**: `today` (≡ `sod`), `tomorrow`, `yesterday`, `now`, `sod`, `eod`; period bounds `sow`/`eow` (week, Monday 00:00 / Sunday 23:59), `soww`/`eoww` (working week, Monday 00:00 / Friday 17:00), `som`/`eom`, `soq`/`eoq`, `soy`/`eoy`, `sond`/`eond` (next day), `sonw`/`eonw`, `sopw`/`eopw`, `sonm`/`eonm`, `sopm`/`eopm`, `sony`/`eony`, `sopy`/`eopy`.
-- **Compact forms**: `20260812` (all‑day), `20260826-0900`, `0826` (this year), `25-0930` (this month), `17` (this month), `-0900` (today).
+- **Compact forms (T-style)**: `20260812` (all‑day), `20260812T090000` (full),
+  `0826` / `25` (this year/month, trailing‑fill), `0826T0930` / `25T`
+  (this year/month + time), `T0900` (today at 09:00).
 - **Weekdays**: `monday`/`mon`, `friday`/`fri`, with `fri+1` (next Friday).
 - **Times**: `2pm`, `14:30` (if alone, applied to today).
 

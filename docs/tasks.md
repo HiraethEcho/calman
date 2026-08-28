@@ -22,8 +22,8 @@ A date-only `due:` (e.g. `due:tomorrow`, `due:20260826`) is stored as an
 
 ```sh
 calman add "standup" start:tomorrow recur:daily
-calman add "lunch" start:today-1200 duration:45min +team
-calman add "demo" start:2026-09-01 end:2026-09-01T15:00 location:"Zoom"
+calman add "lunch" start:T1200 duration:45min +team
+calman add "demo" start:2026-09-01 end:2026-09-01 15:00 location:"Zoom"
 calman add "conference" start:2026-10-12 allday
 ```
 
@@ -40,22 +40,22 @@ calman add "conference" start:2026-10-12 allday
 | `due:<date>` | todo | Deadline. Date-only → all-day todo. |
 | `start:<date>` | event | Start time. Date-only → all-day event. |
 | `end:<date>` | event | End time/date (alternative to `duration:`). All-day `end` is the **last included day** (stored as day-after). |
-| `duration:<dur>` | event | Length, e.g. `45min`, `1h`, `1h30m`, `2d`. Alternative to `end:`. |
+| `duration:<dur>` | event | Length, e.g. `45min`, `1h`, `1h30m`, `2d`, or ISO 8601 `PT15M`/`P7D`. Alternative to `end:`. |
 | `allday` / `+allday` | event | Force all-day (drops times & `DTEND`). |
 | `pri:H\|M\|L` (or `pri:<0-9>`) | both | Priority — `H`=9, `M`=5, `L`=1, or 0–9. |
 | `+tag` / `-tag` | both | Tags (`-tag` only removes on `modify`). |
-| `source:<name>` | add (single) / list / count / sync | Target or selection. `ics-dir` uses `name/collection`. |
+| `source:<name>` / `src:<name>` | add (single) / list / count / sync | Target or selection. `ics-dir` uses `name/collection`. |
 | `rel:<id>` | both | Parent relation — written as `RELATED-TO;RELTYPE=PARENT` (child stores parent UID). |
 | `recur:<rule>` / `repeat:<rule>` | both | Recurrence, normalised to RFC 5545 `RRULE` (see [Recurrence](recurrence.md)). |
 | `location:<text>` | event | `LOCATION` property. |
-| `alert:<lead>` | both | `VALARM` lead time before start/due, e.g. `alert:15min` → `TRIGGER:-PT900S`. |
+| `alert:<lead>` | both | `VALARM` lead time before start/due, e.g. `alert:15min` → `TRIGGER:-PT900S`, or ISO `alert:PT15M`. |
 | `desc:<text>` | both | `DESCRIPTION` (separate from `summary`/`SUMMARY`). |
-| `status:<x>` | modify | `pending` / `in-progress` / `completed` / `cancelled`. |
+| `status:<x>` | modify | `pending` / `in-progress` / `completed` / `cancelled` / `recurring`. |
 
 Example combining several:
 
 ```sh
-calman add "1:1 with boss" start:tomorrow-1430 duration:30min \
+calman add "1:1 with boss" start:2026-08-29 14:30 duration:30min \
   pri:H +1on1 location:"Office" alert:10min recur:weekly
 ```
 

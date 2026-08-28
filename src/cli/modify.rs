@@ -5,9 +5,9 @@
 //! all-day, a date-time `start:` makes it timed. `end:`/`duration:` optional.
 
 use crate::args::ParsedArgs;
-use crate::cli::open_storage;
+use crate::cli::{open_storage, resolve_source, resolve_targets_occ};
 use crate::config::Config;
-use crate::date_parser::{
+use crate::date::{
     DateValue, local_midnight, parse_date_value, parse_duration, resolve_end,
 };
 use crate::model::{Task, TaskStatus};
@@ -78,14 +78,39 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         None => None,
     };
 
-    for (uid, source) in crate::cli::resolve_targets(conf, override_, &q.ids)? {
-        let src = conf
-            .source(&source)
-            .ok_or_else(|| anyhow::anyhow!("unknown source `{source}`"))?;
-        let mut st = open_storage(conf, src)?;
-        st.update(&uid, |t| {
+    for tgt in resolve_targets_occ(conf, override_, &q.ids, q.occ_date)? {
+        let src = resolve_source(conf, &tgt.source)?;
+        let mut st = open_storage(conf, &src)?;
+
+        if let Some(occ) = tgt.occ_date {
+            // Per-occurrence modify: create a RECURRENCE-ID override sibling.
+            let master = st
+                .list()
+                .iter()
+                .find(|t| t.uid == tgt.uid)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("task `{}` disappeared", tgt.uid))?;
+            if !master.is_parent() {
+                bail!("task `{}` is not a recurring parent", tgt.uid);
+            }
+            let mut ov = master.clone();
+            ov.uid = uuid::Uuid::new_v4().to_string();
+            ov.parent_uid = Some(master.uid);
+            ov.recurrence_id = Some(occ);
+            ov.rrule = None;
+            ov.exdates = Vec::new();
+            ov.status = TaskStatus::Pending; // an occurrence is a single active instance
+            if ov.is_event() {
+                let delta = occ - ov.dtstart.unwrap_or(occ);
+                ov.dtstart = Some(occ);
+                ov.dtend = ov.dtend.map(|e| e + delta);
+            } else {
+                ov.due = Some(occ);
+            }
+            ov.created_at = Utc::now();
+            ov.updated_at = Utc::now();
             apply(
-                t,
+                &mut ov,
                 &Upd {
                     text: q.text.clone(),
                     priority: q.priority,
@@ -106,9 +131,36 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
                     related: related.clone(),
                     default_duration,
                 },
-            )
-        })?
-        .ok_or_else(|| anyhow::anyhow!("task `{uid}` disappeared"))?;
+            )?;
+            st.add(ov)?;
+        } else {
+            st.update(&tgt.uid, |t| {
+                apply(
+                    t,
+                    &Upd {
+                        text: q.text.clone(),
+                        priority: q.priority,
+                        due: q.due,
+                        due_allday: q.due_allday,
+                        status: q.status,
+                        tags: q.tags.clone(),
+                        anti_tags: q.anti_tags.clone(),
+                        location: q.location.clone(),
+                        repeat: q.repeat.clone(),
+                        description: q.description.clone(),
+                        allday: q.allday,
+                        start,
+                        start_allday,
+                        end,
+                        duration: dur,
+                        alert,
+                        related: related.clone(),
+                        default_duration,
+                    },
+                )
+            })?
+            .ok_or_else(|| anyhow::anyhow!("task `{}` disappeared", tgt.uid))?;
+        }
     }
     println!("modified: {}", q.ids.join(", "));
     Ok(())

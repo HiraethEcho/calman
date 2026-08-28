@@ -22,6 +22,7 @@ include = ["report.example.toml", "colorscheme.example.toml"]
 [defaults]
 write_source = "work"                # `add` 写入的默认 source 名 (必填)
 default_report = "next"              # 裸 `calman` 运行的报告: "ls" | "list" | "next"
+recur_expand_count = 1               # 每个周期系列展开的 occurrence 数 (0 = 全部)
 
 # ---------------------------------------------------------------- [contexts]
 # 各命令上下文默认使用哪些 source (空列表 = 全部)
@@ -33,15 +34,13 @@ tui  = ["work", "personal"]          # TUI 启动时显示; 空 = 全部
 # ------------------------------------------------------------------- [date]
 # 日期解析引擎设置
 [date]
-workweek_end = "17:00"               # eoww (工作周结束) 的截止时刻
-week_start = "monday"                # 一周第一天: monday | sunday
+workweek_end = "17:00"                # eoww (工作周结束) 的截止时刻
+# eoww = 本周五 HH:MM (默认 17:00), 格式 "HH:MM" 或 "HHMM"
 default_event_duration = "1h"        # event 无 end:/duration: 时的默认时长
 # 仅含日期的 due (全天 todo): true=到期当天即算逾期, false=过期后次日才算 (默认)
 due_date_overdue_today = true
-
-# ------------------------------------------------------------------ [locale]
-[locale]
-language = "en"                      # en | zh-CN
+# IANA 时区 (序列化 ICS TZID 用); 省略 → 自动探测 $TZ / /etc/localtime
+# timezone = "Asia/Shanghai"
 
 # ------------------------------------------------------------------ [source]
 # 数据源。type:

@@ -90,6 +90,86 @@
 
 ---
 
+## 2.6 Modularization & date/recurrence redesign
+**Goal**: selective compilation via Cargo features; redesigned `T`-based date syntax; NL date + NL→RRULE via libraries.
+
+### Features (`Cargo.toml`)
+```
+default = ["storage-jsonl", "storage-ics", "date-ical", "date-natural"]   # no tui by default
+storage-jsonl = []
+storage-ics   = ["dep:chrono-tz"]
+date-ical     = []                                # baseline: T-compact format + raw RRULE passthrough
+date-natural  = ["date-ical", "dep:interim", "dep:text2rrule"]
+tui           = ["dep:ratatui", "dep:crossterm"]
+recur-expand  = ["date-ical", "dep:rrule", "dep:chrono-tz"]   # optional: expand occurrences
+```
+Minimal build: `--no-default-features --features storage-ics,date-ical`.
+
+### Libraries (search results)
+- NL dates: `interim` (maintained `chrono-english` fork) — `next tuesday`, `in 3 days`, `tomorrow 8pm`. [github.com/conradludgate/interim](https://github.com/conradludgate/interim)
+- NL→RRULE: `text2rrule` — `every tuesday` → `FREQ=WEEKLY;BYDAY=TU`. v0.1.x, needs Rust 1.85+. [github.com/carmiac/text2rrule](https://github.com/carmiac/text2rrule)
+- RRULE expand (optional): `rrule` (rust-rrule). [github.com/fmeringdal/rust-rrule](https://github.com/fmeringdal/rust-rrule)
+- Taskwarrior-style keywords (`eod`/`soq`/`sonww`/`sow`/`eom`/`eoy`…) kept custom, in `date-ical`.
+
+### Modules
+- `src/date/mod.rs` dispatches `parse_date_value`/`parse_datetime`/`parse_duration`/`resolve_end`/`local_midnight`/`named_date`.
+  - `src/date/ical.rs` (`#[cfg(feature="date-ical")]`) — rewritten T-compact parser.
+  - `src/date/natural.rs` (`#[cfg(feature="date-natural")]`) — `interim` wrapper.
+- `src/recurrence.rs` `normalize_recurrence`: `FREQ=`/`RRULE:` passthrough (always); `date-natural` → `text2rrule`; `date-ical`-only → reject non-iCal.
+- `src/storage/{jsonl,ics}.rs` each `#[cfg(feature="storage-*")]`; `storage/mod.rs` selects backend at runtime by config `type`; `SourceType` variants cfg-gated; `Config::load` errors on disabled source type / `tui` section.
+- `src/cli/tui.rs` + `src/tui/` `#[cfg(feature="tui")]`; `main`/`cli/mod.rs` hide `tui` command; `TuiConfig` cfg-gated.
+
+### Date parser redesign (`T` marker) — `src/date/ical.rs`
+- `YYYYMMDDTHHMMSS` (≥8 digits + `T`) → full (`20260828T090000`).
+- Digits only, no `T`: 8 → `YYYYMMDD` all-day; <8 → trailing digits of `YYYYMMDD`, prefix filled from today (`0823`→2026-08-23, `25`→2026-08-25, `260823`→2026-08-23).
+- `<8` digits before `T` (`0828T0900`, `25T`): digits = trailing `YYYYMMDD` (year/month from today), after-`T` = `HHMMSS` (zero-padded).
+- `T` prefix (`T0900`, `T09`): today's date + after-`T` `HHMMSS` (pad to 6); `T09`=today 09:00:00, `T`=today 00:00:00.
+- Keep: `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, `HH:MM` (today), `now`, named boundaries, relative `+3d`/`-2w`/`+1h`.
+- Remove `-HHMM` time syntax (→ `T` prefix); `start:-0900` → `start:T0900` (update docs/tests/examples).
+- `DateValue::{Date,Time}` unchanged; `local_to_utc`/`resolve_end` retained.
+
+### Recurrence model (Taskwarrior-inspired)
+- New `TaskStatus::Recurring`. A task with `rrule` set (via `recur:`/`repeat:`) gets `status = Recurring` on `add` (unless explicit status given).
+- Virtual tag `PARENT` ⇒ `rrule.is_some()` (status == Recurring). Filterable `+PARENT`/`-PARENT`; also `status:recurring`/`-status:recurring`.
+- Default `list`/`next`/`ls` hide recurring parents: append `-status:recurring` (≡ `-PARENT`) to built-in `filter` in `config.default.toml` `[report.*]`.
+- `modify`/`delete` on a recurring item operate on the **master** record (single VEVENT/VTODO + RRULE in its ics/jsonl file). `done` on a recurring parent ⇒ `Cancelled` (stops series); `delete` removes it.
+- Optional `recur-expand` feature: `list`/`next` compute upcoming occurrences in-memory via `rrule` crate (`all_between`) and emit virtual marked rows (`⟳`), so series are visible without child records. Parent still hidden by default.
+- ICS: `Recurring` renders as `NEEDS-ACTION`(VTODO)/`CONFIRMED`(VEVENT) + `RRULE:`; parse: `RRULE` present ⇒ `Recurring`.
+- **Per-occurrence exceptions (iOS-compatible, RFC 5545)**: delete one occurrence ⇒ add its original `DTSTART` to master `EXDATE`; modify one occurrence ⇒ create sibling component (same `UID`, `RECURRENCE-ID` = that occurrence's original `DTSTART`, overridden fields); master keeps `RRULE`. iOS Calendar recognises both.
+- **Occurrence addressing (CLI)**: `on:<date>` (occurrence's original start) or `.<n>` (nth upcoming). e.g. `calman done 5 on:2026-09-02`, `calman modify 5.2 summary:"x"`.
+- **Data model**: `Task` gains `exdates: Vec<DateTime<Utc>>` + `recurrence_id: Option<DateTime<Utc>>` (overrides); jsonl stores them; ics writes `EXDATE` / `RECURRENCE-ID`. `recur-expand` uses `rrule` crate `all_between`; expanded virtual rows carry occurrence date for `on:`/`.n` targeting.
+
+### Steps
+1. [x] `Cargo.toml`: features + deps (`interim`, `text2rrule`; `rrule` only for `recur-expand`).
+2. [x] Create `src/date/{mod,ical,natural}.rs`; migrate `date_parser.rs` logic into `ical.rs`, rewrite T rules.
+3. [x] `src/recurrence.rs`: passthrough + `text2rrule` (cfg); keep raw validation.
+4. [x] Gate storage modules; cfg-gate `SourceType` variants; `Config` validation.
+5. [x] Gate `tui` module; hide command.
+6. [x] Update `args.rs` (drop `-HHMM` special-case), `add.rs`/`modify.rs` unchanged (still call `parse_date_value`).
+7. [x] Update docs (DESIGN/SPEC/usage/dates/recurrence/install/README) + tests.
+8. [x] `cargo clippy --all-targets` + `cargo test` green; minimal `cargo build --no-default-features --features storage-ics,date-ical`.
+9. [x] Recurrence model: `TaskStatus::Recurring` + `status_to_ics`/`status_from_ics`/`event_status_*` handling; `PARENT` virtual tag in `filter.rs`/`report.rs`; default report `filter` hides `status:recurring` in `config.default.toml`; `done` on recurring ⇒ `Cancelled`; `modify`/`delete` target master record.
+10. [x] `recur-expand` (optional feature): occurrence generation in `list`/`next` via `rrule` crate; virtual marked rows; parent hidden by default.
+11. [x] Per-occurrence exceptions (iOS-compatible): `Task.exdates`/`recurrence_id`; `on:<date>`/`.n` occurrence addressing in `args.rs`/`cli`; `done <id> on:<date>` ⇒ `EXDATE`; `modify <id>.<n>`/`on:` ⇒ sibling `RECURRENCE-ID` override component; ics writes `EXDATE`/`RECURRENCE-ID`; jsonl persists fields.
+
+### Risks
+- `text2rrule` needs Rust 1.85+ (edition 2024 — confirm toolchain).
+- `interim`/`text2rrule` MSRV vs chrono version compatibility.
+- `rrule` pulls `chrono-tz` (already used by `ics` — acceptable); `recur-expand` optional only.
+- Feature-matrix: `Config` must validate enabled backends; add CI `cargo test --no-default-features --features …`.
+- `T` ambiguity (`930` → 93h?) → document as `HH[MM[SS]]` only.
+
+### 2.7 Post-2.6 hardening (completed)
+- [x] `recur-expand` moved into **default features**; occurrence rows get plain sequential IDs (Taskwarrior-style), `id.n`/`on:<date>` kept as aliases.
+- [x] `recur_expand_count` config (`[defaults]`, default 1 = nearest occurrence only).
+- [x] `recur`/`recurrence` report column renders RRULE as ISO period (`P7D`/`P2W`/`P1M`/`P1Y`).
+- [x] ISO 8601 durations/periods: `recur:P7D`, `alert:PT15M`, `duration:P2W` (works without `date-natural`).
+- [x] `workweek_end` config implemented (drives `eoww`); removed dead `week_start`/`[locale]` config.
+- [x] `src:` alias for `source:` (CLI + filter); `desc:` capture fixed with `src:`; multiline `desc` single-line render (`␤`) + display-width truncation (`unicode-width`); CJK-safe arg prefix checks.
+- [x] Composite `ics-dir` sources (`remote/sorge`) fixed for `done`/`delete`/`modify` via `cli::resolve_source`.
+
+---
+
 ## Phase 3: TUI Complete Implementation
 **Goal**: Full left‑right two‑panel TUI with browsing, editing, and settings persistence.
 

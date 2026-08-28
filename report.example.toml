@@ -46,7 +46,7 @@ columns = [
   { field = "summary", label = "SUMMARY" },
 ]
 
-# 可用字段 (field): id status summary desc tags date due pri type source
+# 可用字段 (field): id status summary desc tags date due pri type source recur/recurrence
 #   summary = CalDAV SUMMARY; desc = DESCRIPTION; date/due 列对 event 显示 dtstart
 # 可用格式 (format): relative | countdown | iso | truncate; date/due 另有
 #   event_format / todo_format 分别定制 event 与 todo 的显示
@@ -68,15 +68,17 @@ columns = [
 # 全局图标覆盖 (可选; 缺失的键回落到内置默认)
 # 合并后的 STATUS 列按任务类型取表: todo → [icons.todo], event → [icons.event]
 [icons]
-[icons.todo]                         # VTODO: pending=○ in-progress=● completed=✓ cancelled=✕
+[icons.todo]                         # VTODO: pending=○ in-progress=● recurring=⟳ completed=✓ cancelled=✕
 pending = "○"
 in-progress = "●"
+recurring = "⟳"
 completed = "✓"
 cancelled = "✕"
 
-[icons.event]                        # VEVENT: pending/confirmed=○, cancelled=✕ (无 completed)
+[icons.event]                        # VEVENT: pending/confirmed/recurring=○, cancelled=✕ (无 completed)
 pending = "○"
 in-progress = "●"
+recurring = "○"
 completed = "✓"
 cancelled = "✕"
 

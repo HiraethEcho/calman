@@ -15,6 +15,9 @@
 write_source = "work"
 # Report run by bare `calman` (unset → "next").
 # default_report = "next"
+# Upcoming occurrences to show per recurring series (recur-expand).
+# 1 = nearest only (default); 0 = all future in the 1-year window.
+recur_expand_count = 1
 
 # ------------------------------------------------------------------- [contexts]
 # Per-context source lists. Empty = all sources.
@@ -25,10 +28,8 @@ tui = []
 
 # ----------------------------------------------------------------------- [date]
 [date]
-# End of the working week (used by `eoww`). Reserved; not yet applied.
+# End of the working week (`eoww`), e.g. "17:00".
 workweek_end = "17:00"
-# First day of the week (used by `sow`/`eow`). Reserved; not yet applied.
-week_start = "monday"
 # Default event length when neither `end:` nor `duration:` is given (e.g. "1h").
 # A date-only `start:` is always a full-day (all-day) event and ignores this.
 default_event_duration = "1h"
@@ -48,24 +49,21 @@ vim_keys = false
 # TUI default view filter: "todo" | "event" | "all".
 default_filter = ""
 
-# ---------------------------------------------------------------------- [locale]
-[locale]
-# UI language: "en" | "zh-CN".
-language = "en"
-
 # ---------------------------------------------------------------------- [icons]
 # Per-kind nerdfont overrides. Omit to use builtin defaults:
-#   todo:   pending=○  in-progress=●  completed=✓  cancelled=✕
-#   event:  pending=󰃭 (calendar)  in-progress=●  completed=✓  cancelled=✕
+#   todo:   pending=○  in-progress=●  recurring=⟳  completed=✓  cancelled=✕
+#   event:  pending=󰃭 (calendar)  in-progress=●  recurring=󰃭  completed=✓  cancelled=✕
 [icons]
 [icons.todo]
 pending = "○"
 in-progress = "●"
+recurring = "⟳"
 completed = "✓"
 cancelled = "✕"
 [icons.event]
 pending = "󰃭"
 in-progress = "●"
+recurring = "󰃭"
 completed = "✓"
 cancelled = "✕"
 
@@ -99,7 +97,7 @@ tagged = {fg="gray10"}
 # ------------------------------------------------------------------- [report.*]
 # Built-in reports (ls/list/next). Override here to change columns/filter/sort.
 [report.ls]
-filter = "type:todo status:active or type:event due.after:sod"
+filter = "type:todo status:active -status:recurring or type:event due.after:sod -status:recurring"
 sort = ["due+", "created+"]
 columns = [
   { field = "id", label = "ID", width = 4 },
@@ -109,7 +107,7 @@ columns = [
 ]
 
 [report.list]
-filter = "type:todo -status:completed -status:cancelled or type:event due.after:sod"
+filter = "type:todo -status:completed -status:cancelled -status:recurring or type:event due.after:sod -status:recurring"
 sort = ["status-", "pri-", "due+"]
 columns = [
   { field = "id", label = "ID", width = 4 },
@@ -117,12 +115,14 @@ columns = [
   { field = "pri", label = "PRI" },
   { field = "date", label = "DATE", todo_format = "relative" },
   { field = "tags", label = "TAGS" },
+  { field = "recur", label = "RECUR" },
   { field = "summary", label = "SUMMARY" },
-  { field = "desc", label = "DESC" },
+  { field = "desc", label = "DESC", format = "truncate", width = 40 },
 ]
 
 [report.next]
-filter = "type:todo status:active or type:event due.after:sod"
+filter = "type:todo status:active -status:recurring or type:event due.after:sod -status:recurring"
+# Recurring series parents are hidden by default; show with `+PARENT` / `status:recurring`.
 sort = ["due+", "pri-"]
 columns = [
   { field = "id", label = "ID", width = 4 },
