@@ -36,6 +36,7 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         && !q.allday
         && q.alert.is_none()
         && q.rel.is_none()
+        && q.wait.is_none()
     {
         bail!("no changes specified");
     }
@@ -69,7 +70,14 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         None => None,
     };
 
-    let default_duration = parse_duration(&conf.date.default_event_duration)?;
+    let default_duration = {
+        let def = conf.date.default_event_duration.trim();
+        if def.is_empty() {
+            None
+        } else {
+            Some(parse_duration(def)?)
+        }
+    };
     let related = match &q.rel {
         Some(rel) => {
             let targets = crate::cli::resolve_targets(conf, None, std::slice::from_ref(rel))?;
@@ -130,6 +138,7 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
                     alert,
                     related: related.clone(),
                     default_duration,
+                    wait: q.wait.clone(),
                 },
             )?;
             st.add(ov)?;
@@ -156,6 +165,7 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
                         alert,
                         related: related.clone(),
                         default_duration,
+                        wait: q.wait.clone(),
                     },
                 )
             })?
@@ -184,7 +194,8 @@ struct Upd {
     duration: Option<Duration>,
     alert: Option<i64>,
     related: Option<String>,
-    default_duration: Duration,
+    default_duration: Option<Duration>,
+    wait: Option<String>,
 }
 
 fn apply(t: &mut Task, u: &Upd) -> Result<()> {
@@ -254,8 +265,10 @@ fn apply(t: &mut Task, u: &Upd) -> Result<()> {
         } else if let Some(d) = u.duration {
             t.dtend = Some(s + d);
         } else if u.start.is_some() && !t.allday && t.dtend.is_none() {
-            // Newly timed event without explicit end → default duration.
-            t.dtend = Some(s + u.default_duration);
+            // Newly timed event without explicit end → default duration (if any).
+            if let Some(d) = u.default_duration {
+                t.dtend = Some(s + d);
+            }
         }
     } else if u.end.is_some() || u.duration.is_some() {
         bail!("target has no start; use `start:` to make it an event first");
@@ -267,6 +280,14 @@ fn apply(t: &mut Task, u: &Upd) -> Result<()> {
         && e <= s
     {
         t.dtend = None;
+    }
+
+    if let Some(w) = &u.wait {
+        let anchor = t
+            .due
+            .or(t.dtstart)
+            .ok_or_else(|| anyhow::anyhow!("wait needs a date anchor: give `due:` (todo) or `start:` (event)"))?;
+        t.wait = Some(crate::args::resolve_wait(w, anchor)?);
     }
     Ok(())
 }

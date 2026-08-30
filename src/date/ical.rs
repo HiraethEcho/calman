@@ -259,30 +259,31 @@ fn named_date(s: &str) -> Option<DateTime<Utc>> {
         )
     };
 
+    let ((sh, sm, ss), (eh, em, es)) = super::day_bounds();
     let (first, _last, tm) = match s {
         "now" => return Some(Utc::now()),
-        "today" | "sod" => (today, today, (0, 0, 0)),
+        "today" | "sod" => (today, today, (sh, sm, ss)),
         "tomorrow" | "sond" => (
             today + Duration::days(1),
             today + Duration::days(1),
-            (0, 0, 0),
+            (sh, sm, ss),
         ),
         "yesterday" => (
             today - Duration::days(1),
             today - Duration::days(1),
-            (0, 0, 0),
+            (sh, sm, ss),
         ),
-        "eod" => (today, today, (23, 59, 59)),
+        "eod" => (today, today, (eh, em, es)),
         "eond" => (
             today + Duration::days(1),
             today + Duration::days(1),
-            (23, 59, 59),
+            (eh, em, es),
         ),
-        "sow" | "soww" => (week_start, week_start, (0, 0, 0)),
+        "sow" | "soww" => (week_start, week_start, (sh, sm, ss)),
         "eow" => (
             week_start + Duration::days(6),
             week_start + Duration::days(6),
-            (23, 59, 59),
+            (eh, em, es),
         ),
         "eoww" => {
             let (hh, mm) = super::workweek_end();
@@ -295,78 +296,78 @@ fn named_date(s: &str) -> Option<DateTime<Utc>> {
         "sonw" | "sonww" => (
             week_start + Duration::days(7),
             week_start + Duration::days(7),
-            (0, 0, 0),
+            (sh, sm, ss),
         ),
         "eonw" | "eonww" => (
             week_start + Duration::days(13),
             week_start + Duration::days(13),
-            (23, 59, 59),
+            (eh, em, es),
         ),
         "sopw" | "sopww" => (
             week_start - Duration::days(7),
             week_start - Duration::days(7),
-            (0, 0, 0),
+            (sh, sm, ss),
         ),
         "eopw" | "eopww" => (
             week_start - Duration::days(1),
             week_start - Duration::days(1),
-            (23, 59, 59),
+            (eh, em, es),
         ),
         "som" => {
             let (f, _) = month(today);
-            (f, f, (0, 0, 0))
+            (f, f, (sh, sm, ss))
         }
         "eom" => {
             let (_, l) = month(today);
-            (l, l, (23, 59, 59))
+            (l, l, (eh, em, es))
         }
         "sonm" => {
             let (f, _) = month(today.checked_add_months(Months::new(1))?);
-            (f, f, (0, 0, 0))
+            (f, f, (sh, sm, ss))
         }
         "eonm" => {
             let (_, l) = month(today.checked_add_months(Months::new(1))?);
-            (l, l, (23, 59, 59))
+            (l, l, (eh, em, es))
         }
         "sopm" => {
             let (f, _) = month(today.checked_sub_months(Months::new(1))?);
-            (f, f, (0, 0, 0))
+            (f, f, (sh, sm, ss))
         }
         "eopm" => {
             let (_, l) = month(today.checked_sub_months(Months::new(1))?);
-            (l, l, (23, 59, 59))
+            (l, l, (eh, em, es))
         }
         "soq" => {
             let (f, _) = quarter(today);
-            (f, f, (0, 0, 0))
+            (f, f, (sh, sm, ss))
         }
         "eoq" => {
             let (_, l) = quarter(today);
-            (l, l, (23, 59, 59))
+            (l, l, (eh, em, es))
         }
         "soy" => {
             let (f, _) = year(today);
-            (f, f, (0, 0, 0))
+            (f, f, (sh, sm, ss))
         }
         "eoy" => {
             let (_, l) = year(today);
-            (l, l, (23, 59, 59))
+            (l, l, (eh, em, es))
         }
         "sony" => {
             let (f, _) = year(today.checked_add_months(Months::new(12))?);
-            (f, f, (0, 0, 0))
+            (f, f, (sh, sm, ss))
         }
         "eony" => {
             let (_, l) = year(today.checked_add_months(Months::new(12))?);
-            (l, l, (23, 59, 59))
+            (l, l, (eh, em, es))
         }
         "sopy" => {
             let (f, _) = year(today.checked_sub_months(Months::new(12))?);
-            (f, f, (0, 0, 0))
+            (f, f, (sh, sm, ss))
         }
         "eopy" => {
             let (_, l) = year(today.checked_sub_months(Months::new(12))?);
-            (l, l, (23, 59, 59))
+            (l, l, (eh, em, es))
         }
         _ => return None,
     };

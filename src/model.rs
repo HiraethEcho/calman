@@ -76,6 +76,12 @@ pub struct Task {
 
     // Relations.
     pub related_to: Option<String>,
+    /// Taskwarrior-style wait: offset seconds relative to the item's date
+    /// (due for todo, dtstart for event). Positive = after, negative = before.
+    /// Hidden from reports while `date + wait > now`; per-occurrence for
+    /// recurring series. Stored in ICS as `X-CALMAN-WAIT-OFFSET`.
+    #[serde(default)]
+    pub wait: Option<i64>,
     /// Recurrence exceptions (RFC 5545).
     /// `exdates`: occurrence original `DTSTART`s excluded from the series (delete-one).
     #[serde(default)]
@@ -124,6 +130,7 @@ impl Task {
             allday: false,
             alarm_before: None,
             related_to: None,
+            wait: None,
             exdates: Vec::new(),
             recurrence_id: None,
             parent_uid: None,

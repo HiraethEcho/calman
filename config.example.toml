@@ -36,9 +36,10 @@ tui  = ["work", "personal"]          # TUI 启动时显示; 空 = 全部
 [date]
 workweek_end = "17:00"                # eoww (工作周结束) 的截止时刻
 # eoww = 本周五 HH:MM (默认 17:00), 格式 "HH:MM" 或 "HHMM"
-default_event_duration = "1h"        # event 无 end:/duration: 时的默认时长
-# 仅含日期的 due (全天 todo): true=到期当天即算逾期, false=过期后次日才算 (默认)
-due_date_overdue_today = true
+day_start = "00:00:00"               # sod/sow/som 等日界起点 (HH:MM:SS)
+day_end = "23:59:59"                 # eod/eow/eom 等日界终点 (HH:MM:SS)
+default_event_duration = ""           # event 无 end:/duration: 时的默认时长; 空=瞬间日程(仅 DTSTART)
+# 例: default_event_duration = "1h"
 # IANA 时区 (序列化 ICS TZID 用); 省略 → 自动探测 $TZ / /etc/localtime
 # timezone = "Asia/Shanghai"
 

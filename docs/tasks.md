@@ -49,6 +49,7 @@ calman add "conference" start:2026-10-12 allday
 | `recur:<rule>` / `repeat:<rule>` | both | Recurrence, normalised to RFC 5545 `RRULE` (see [Recurrence](recurrence.md)). |
 | `location:<text>` | event | `LOCATION` property. |
 | `alert:<lead>` | both | `VALARM` lead time before start/due, e.g. `alert:15min` → `TRIGGER:-PT900S`, or ISO `alert:PT15M`. |
+| `wait:<expr>` | both | Taskwarrior-style wait (hidden from reports until then). Date form (`wait:2026-09-01`) or relative offset (`wait:-1d`, `wait:PT12H`) against the task date; per-occurrence for recurring series. |
 | `desc:<text>` | both | `DESCRIPTION` (separate from `summary`/`SUMMARY`). |
 | `status:<x>` | modify | `pending` / `in-progress` / `completed` / `cancelled` / `recurring`. |
 

@@ -199,7 +199,7 @@ fn date_col(label: &str, todo_format: &str) -> Column {
 fn builtin(name: &str) -> Report {
     let (filter, sort, columns) = match name {
         "ls" => (
-            "type:todo status:active -status:recurring or type:event due.after:sod -status:recurring"
+            "type:todo status:active -status:recurring -WAITING or type:event due.after:sod -status:recurring -WAITING"
                 .to_string(),
             vec!["due+", "created+"],
             vec![
@@ -210,7 +210,7 @@ fn builtin(name: &str) -> Report {
             ],
         ),
         "list" => (
-            "type:todo -status:completed -status:cancelled -status:recurring or type:event due.after:sod -status:recurring"
+            "type:todo -status:completed -status:cancelled -status:recurring -WAITING or type:event due.after:sod -status:recurring -WAITING"
                 .to_string(),
             vec!["status-", "pri-", "due+"],
             vec![
@@ -225,7 +225,7 @@ fn builtin(name: &str) -> Report {
             ],
         ),
         "next" => (
-            "type:todo status:active -status:recurring or type:event due.after:sod -status:recurring"
+            "type:todo status:active -status:recurring -WAITING or type:event due.after:sod -status:recurring -WAITING"
                 .to_string(),
             vec!["due+", "pri-"],
             vec![
@@ -390,7 +390,7 @@ fn maybe_truncate(s: &str, c: &Column) -> String {
     }
 }
 
-fn date_str(conf: &Config, r: &Row, c: &Column) -> String {
+fn date_str(_conf: &Config, r: &Row, c: &Column) -> String {
     let dt = crate::filter::task_date(&r.task);
     let Some(dt) = dt else {
         return String::new();
@@ -405,8 +405,8 @@ fn date_str(conf: &Config, r: &Row, c: &Column) -> String {
     }
     if r.task.allday {
         // All-day todos: compare by calendar day so the display agrees with
-        // the `+OVERDUE` filter (which honours `due_date_overdue_today`).
-        return allday_date_str(c, &local, conf.date.due_date_overdue_today);
+        // the `+OVERDUE` filter (date-only due is overdue the day after).
+        return allday_date_str(c, &local);
     }
     match c.todo_format.as_deref().or(c.format.as_deref()) {
         Some("relative") => relative(&local, &Local::now()),
@@ -417,7 +417,7 @@ fn date_str(conf: &Config, r: &Row, c: &Column) -> String {
 }
 
 /// All-day date column: day-granular relative/countdown, else formatted date.
-fn allday_date_str(c: &Column, local: &DateTime<Local>, overdue_today: bool) -> String {
+fn allday_date_str(c: &Column, local: &DateTime<Local>) -> String {
     let day = local.date_naive();
     let today = Local::now().date_naive();
     let days = day.signed_duration_since(today).num_days();
@@ -426,11 +426,7 @@ fn allday_date_str(c: &Column, local: &DateTime<Local>, overdue_today: bool) -> 
             if days < 0 {
                 "overdue".to_string()
             } else if days == 0 {
-                if overdue_today {
-                    "overdue".to_string()
-                } else {
-                    "today".to_string()
-                }
+                "today".to_string()
             } else {
                 format!("{days}d")
             }

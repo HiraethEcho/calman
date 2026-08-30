@@ -13,7 +13,7 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
     let filter = parse_expr(&q.filter_tokens)?;
     let n = rows
         .iter()
-        .filter(|r| filter.matches_with(&r.task, conf.date.due_date_overdue_today))
+        .filter(|r| filter.matches_with(&r.task))
         .count();
     println!("{n}");
     Ok(())

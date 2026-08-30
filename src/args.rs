@@ -52,6 +52,9 @@ pub struct ParsedArgs {
     pub tags: Vec<String>,
     pub anti_tags: Vec<String>,
     pub rel: Option<String>,
+    /// Wait expression (`wait:<date>` / `wait:-1d` / `wait:PT12H`), resolved
+    /// to an offset against the task's date in `add`/`modify`.
+    pub wait: Option<String>,
     /// Occurrence addressing: original DTSTART of the target occurrence (`on:<date>`).
     pub occ_date: Option<DateTime<Utc>>,
     /// `rc.report.<name>.<key>=<value>` tokens (e.g. columns/labels).
@@ -98,6 +101,7 @@ fn is_attr_token(t: &str) -> bool {
         || l.starts_with("desc:")
         || l.starts_with("location:")
         || l.starts_with("rel:")
+        || l.starts_with("wait:")
         || l.starts_with("status:")
         || l.starts_with("priority:")
         || l.starts_with("pri:")
@@ -219,6 +223,8 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
             });
         } else if let Some(rest) = lower.strip_prefix("rel:") {
             q.rel = Some(rest.to_string());
+        } else if let Some(rest) = lower.strip_prefix("wait:") {
+            q.wait = Some(rest.to_string());
         } else if let Some(rest) = lower.strip_prefix("start:") {
             q.start = Some(rest.to_string());
         } else if let Some(rest) = lower.strip_prefix("end:") {
@@ -296,6 +302,7 @@ fn is_filter_only_plus(name: &str) -> bool {
             | "event"
             | "parent"
             | "recurring"
+            | "waiting"
     )
 }
 
@@ -322,6 +329,7 @@ fn is_filter_only_minus(name: &str) -> bool {
             | "event"
             | "parent"
             | "recurring"
+            | "waiting"
     ) || l.starts_with("status:")
         || l.starts_with("source:")
         || l.starts_with("type:")
@@ -565,5 +573,69 @@ mod tests {
         assert_eq!(q.repeat.as_deref(), Some("daily"));
         let q2 = p(&["add", "x", "repeat:weekly"]);
         assert_eq!(q2.repeat.as_deref(), Some("weekly"));
+    }
+}
+
+/// Resolve a `wait:` expression to an offset in seconds against `anchor`
+/// (due for todo, dtstart for event).
+///
+/// - Date forms (`2026-09-01`, `0826`, `T0900`, …) → `target - anchor`
+///   (date-only = local midnight, i.e. visible from that day 00:00).
+/// - Duration forms (`-1d`, `PT12H`, `2w`, `1h30m`) → signed seconds
+///   (negative = before the date, for recurring per-occurrence waits).
+pub fn resolve_wait(expr: &str, anchor: DateTime<Utc>) -> Result<i64> {
+    let s = expr.trim();
+    if s.is_empty() {
+        bail!("empty wait");
+    }
+    // Duration forms first when the token looks like one: signed (`-1d`),
+    // ISO (`PT12H`), or numeric-with-unit (`2w`). Dates (`2026-09-01`, `0826`,
+    // `T0900`, `17`, `tomorrow`) fall through to the date parser.
+    let dur_first = s.starts_with(['-', '+'])
+        || s.starts_with('P')
+        || s.chars().last().is_some_and(|c| c.is_ascii_alphabetic());
+    if dur_first {
+        let (sign, body) = match s.strip_prefix(['-', '+']) {
+            Some(b) => (if s.starts_with('-') { -1 } else { 1 }, b),
+            None => (1, s),
+        };
+        if let Ok(d) = crate::date::parse_duration(body) {
+            return Ok(d.num_seconds() * sign);
+        }
+    }
+    let dv = parse_date_value(s)?;
+    let target = match dv {
+        DateValue::Date(d) => local_midnight(d),
+        DateValue::Time(dt) => dt,
+    };
+    Ok(target.signed_duration_since(anchor).num_seconds())
+}
+
+#[cfg(test)]
+mod wait_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn wait_date_forms() {
+        let anchor = Utc.with_ymd_and_hms(2026, 8, 28, 12, 0, 0).unwrap();
+        // date-only → local midnight of that day minus anchor
+        let off = resolve_wait("2026-08-29", anchor).unwrap();
+        assert!(off > 0);
+        assert!(off < 86_400); // 20:00 local → next midnight
+    }
+
+    #[test]
+    fn wait_duration_forms() {
+        let anchor = Utc::now();
+        assert_eq!(resolve_wait("-1d", anchor).unwrap(), -86_400);
+        assert_eq!(resolve_wait("PT12H", anchor).unwrap(), 43_200);
+        assert_eq!(resolve_wait("2w", anchor).unwrap(), 1_209_600);
+    }
+
+    #[test]
+    fn wait_empty_rejected() {
+        let anchor = Utc::now();
+        assert!(resolve_wait("", anchor).is_err());
     }
 }

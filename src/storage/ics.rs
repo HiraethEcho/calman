@@ -226,6 +226,9 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
     if let Some(l) = &task.location {
         props.push(format!("LOCATION:{}", escape_text(l)));
     }
+    if let Some(w) = task.wait {
+        props.push(format!("X-CALMAN-WAIT-OFFSET:{w}"));
+    }
     if let Some(d) = &task.description {
         props.push(format!("DESCRIPTION:{}", escape_text(d)));
     }
@@ -268,6 +271,7 @@ pub fn parse_ics(content: &str) -> Result<Task> {
     let mut exdates = Vec::new();
     let mut recurrence_id = None;
     let mut parent_uid = None;
+    let mut wait = None;
 
     for raw in unfold(content) {
         let (name, value) = raw
@@ -324,6 +328,7 @@ pub fn parse_ics(content: &str) -> Result<Task> {
                 }
             }
             "RRULE" => rrule = Some(value.to_string()),
+            "X-CALMAN-WAIT-OFFSET" => wait = value.trim().parse::<i64>().ok(),
             "EXDATE" => {
                 let tz = param_tzid(name);
                 let d = match (&tz, name.contains("VALUE=DATE")) {
@@ -391,6 +396,7 @@ pub fn parse_ics(content: &str) -> Result<Task> {
         exdates,
         recurrence_id,
         parent_uid,
+        wait,
     })
 }
 
@@ -583,6 +589,16 @@ mod tests {
         assert_eq!(parsed.summary, t.summary);
         assert_eq!(parsed.tags, t.tags);
         assert_eq!(parsed.due, t.due);
+    }
+
+    #[test]
+    fn wait_offset_roundtrip_via_xprop() {
+        let mut t = make_task();
+        t.wait = Some(-86_400);
+        let rendered = render_ics(&t, Tz::UTC).unwrap();
+        assert!(rendered.contains("X-CALMAN-WAIT-OFFSET:-86400"));
+        let parsed = parse_ics(&rendered).unwrap();
+        assert_eq!(parsed.wait, Some(-86_400));
     }
 
     #[test]

@@ -105,15 +105,14 @@ fn date_only_due_overdue_respects_config() {
         store.display()
     );
 
-    // Default: date-only due is NOT overdue on its own day.
+    // Date-only due is NOT overdue on its own day (fixed behavior).
     std::fs::write(cfg_dir.join("config.toml"), &cfg).unwrap();
     assert!(calman(home, &["add", "d", "due:today"]).1);
     let (out, _) = calman(home, &["+OVERDUE", "count"]);
     assert_eq!(out.trim(), "0");
 
-    // Toggle on: date-only due counts as overdue starting that day.
-    let cfg_on = format!("{}\n[date]\ndue_date_overdue_today = true\n", cfg);
-    std::fs::write(cfg_dir.join("config.toml"), cfg_on).unwrap();
+    // A past date-only due is overdue.
+    assert!(calman(home, &["add", "e", "due:-1d"]).1);
     let (out, _) = calman(home, &["+OVERDUE", "count"]);
     assert_eq!(out.trim(), "1");
 }

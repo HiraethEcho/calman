@@ -86,8 +86,10 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         } else if let Some(d) = dur {
             task.dtend = Some(task.dtstart.unwrap() + d);
         } else if !task.allday {
-            task.dtend =
-                Some(task.dtstart.unwrap() + parse_duration(&conf.date.default_event_duration)?);
+            let def = conf.date.default_event_duration.trim();
+            if !def.is_empty() {
+                task.dtend = Some(task.dtstart.unwrap() + parse_duration(def)?);
+            }
         }
 
         if !task.allday
@@ -120,6 +122,14 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
             bail!("alert must be positive, got `{a}`");
         }
         task.alarm_before = Some(secs);
+    }
+
+    if let Some(w) = &q.wait {
+        let anchor = task
+            .due
+            .or(task.dtstart)
+            .ok_or_else(|| anyhow::anyhow!("wait needs a date anchor: give `due:` (todo) or `start:` (event)"))?;
+        task.wait = Some(crate::args::resolve_wait(w, anchor)?);
     }
 
     let mut st = open_storage(conf, &src)?;

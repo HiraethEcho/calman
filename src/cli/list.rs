@@ -23,10 +23,13 @@ pub fn run(conf: &Config, q: &ParsedArgs, report_name: &str) -> Result<()> {
     let cli_filter = parse_expr(&q.filter_tokens)?;
     let mut report = Report::resolve(report_name, conf);
     report::apply_rc(&mut report, &q.rc_reports, report_name)?;
-    let report_filter = if wants_recurring(&q.filter_tokens) {
-        // User explicitly asked for series parents/occurrences: drop the
-        // default `-status:recurring` exclusion so `+PARENT` etc. can match.
-        let f = report.filter.replace("-status:recurring", "");
+    let report_filter = if wants_include(&q.filter_tokens) {
+        // User explicitly asked for series parents/waiting items: drop the
+        // default `-status:recurring` / `-WAITING` exclusions so they match.
+        let f = report
+            .filter
+            .replace("-status:recurring", "")
+            .replace("-WAITING", "");
         crate::filter::parse_expr_str(&f)?
     } else {
         report.filter()?
@@ -35,8 +38,8 @@ pub fn run(conf: &Config, q: &ParsedArgs, report_name: &str) -> Result<()> {
     let mut selected: Vec<&Row> = rows
         .iter()
         .filter(|r| {
-            cli_filter.matches_with(&r.task, conf.date.due_date_overdue_today)
-                && report_filter.matches_with(&r.task, conf.date.due_date_overdue_today)
+            cli_filter.matches_with(&r.task)
+                && report_filter.matches_with(&r.task)
         })
         .collect();
     report::sort_rows(&mut selected, &report.sort);
@@ -44,10 +47,14 @@ pub fn run(conf: &Config, q: &ParsedArgs, report_name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Does the CLI filter explicitly mention recurring series (`PARENT`/`status:recurring`)?
-fn wants_recurring(tokens: &[String]) -> bool {
+/// Does the CLI filter explicitly mention hidden-by-default features
+/// (`PARENT`/`status:recurring`/`WAITING`)? If so, drop the report's default
+/// exclusion so the user's `+...` can match.
+fn wants_include(tokens: &[String]) -> bool {
     tokens.iter().any(|t| {
         let l = t.to_ascii_lowercase();
-        l.contains("parent") || l.contains("status:recurring")
+        l.contains("parent")
+            || l.contains("status:recurring")
+            || l.contains("waiting")
     })
 }

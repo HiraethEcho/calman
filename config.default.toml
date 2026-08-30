@@ -30,12 +30,13 @@ tui = []
 [date]
 # End of the working week (`eoww`), e.g. "17:00".
 workweek_end = "17:00"
-# Default event length when neither `end:` nor `duration:` is given (e.g. "1h").
-# A date-only `start:` is always a full-day (all-day) event and ignores this.
-default_event_duration = "1h"
-# For a date-only `due` (all-day todo): count as overdue starting on its own
-# day (`true`) or only after the day passes (`false`, default).
-due_date_overdue_today = false
+# Day start for named boundaries (`sod`/`sow`/`som`/…).
+day_start = "00:00:00"
+# Day end for named boundaries (`eod`/`eow`/`eom`/…).
+day_end = "23:59:59"
+# Fallback event length when neither `end:` nor `duration:` is given.
+# Empty (default) ⇒ instant event (DTSTART only, no DTEND).
+default_event_duration = ""
 # IANA timezone used when serialising timed `DTSTART`/`DTEND`/`DUE` to ICS with a
 # `TZID` (iOS-style local wall time). Omitted → auto-detected from `$TZ` /
 # `/etc/localtime`, else `UTC`.
@@ -97,7 +98,7 @@ tagged = {fg="gray10"}
 # ------------------------------------------------------------------- [report.*]
 # Built-in reports (ls/list/next). Override here to change columns/filter/sort.
 [report.ls]
-filter = "type:todo status:active -status:recurring or type:event due.after:sod -status:recurring"
+filter = "type:todo status:active -status:recurring -WAITING or type:event due.after:sod -status:recurring -WAITING"
 sort = ["due+", "created+"]
 columns = [
   { field = "id", label = "ID", width = 4 },
@@ -107,7 +108,7 @@ columns = [
 ]
 
 [report.list]
-filter = "type:todo -status:completed -status:cancelled -status:recurring or type:event due.after:sod -status:recurring"
+filter = "type:todo -status:completed -status:cancelled -status:recurring -WAITING or type:event due.after:sod -status:recurring -WAITING"
 sort = ["status-", "pri-", "due+"]
 columns = [
   { field = "id", label = "ID", width = 4 },
@@ -121,7 +122,7 @@ columns = [
 ]
 
 [report.next]
-filter = "type:todo status:active -status:recurring or type:event due.after:sod -status:recurring"
+filter = "type:todo status:active -status:recurring -WAITING or type:event due.after:sod -status:recurring -WAITING"
 # Recurring series parents are hidden by default; show with `+PARENT` / `status:recurring`.
 sort = ["due+", "pri-"]
 columns = [

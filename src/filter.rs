@@ -47,6 +47,7 @@ pub enum Flag {
     Untagged,
     Scheduled,
     Parent,
+    Waiting,
 }
 
 /// A single positive atom. Negations live in `Expr::Not`.
@@ -75,20 +76,20 @@ impl Expr {
     /// Matches with the default overdue policy (all-day due overdue only after its day).
     #[allow(dead_code)] // convenience wrapper; production uses `matches_with`
     pub fn matches(&self, t: &Task) -> bool {
-        self.matches_with(t, false)
+        self.matches_with(t)
     }
 
-    /// `overdue_allday_today` selects whether a date-only `due` counts as
-    /// overdue starting on its own day (per `[date].due_date_overdue_today`).
-    pub fn matches_with(&self, t: &Task, overdue_allday_today: bool) -> bool {
+    /// Overdue policy is fixed: a date-only `due` counts overdue the day
+    /// after it passes.
+    pub fn matches_with(&self, t: &Task) -> bool {
         match self {
-            Expr::Atom(f) => f.matches_with(t, overdue_allday_today),
-            Expr::Not(e) => !e.matches_with(t, overdue_allday_today),
+            Expr::Atom(f) => f.matches_with(t),
+            Expr::Not(e) => !e.matches_with(t),
             Expr::And(a, b) => {
-                a.matches_with(t, overdue_allday_today) && b.matches_with(t, overdue_allday_today)
+                a.matches_with(t) && b.matches_with(t)
             }
             Expr::Or(a, b) => {
-                a.matches_with(t, overdue_allday_today) || b.matches_with(t, overdue_allday_today)
+                a.matches_with(t) || b.matches_with(t)
             }
         }
     }
@@ -102,10 +103,10 @@ pub fn task_date(t: &Task) -> Option<DateTime<Utc>> {
 impl Filter {
     #[allow(dead_code)] // convenience wrapper; production uses `matches_with`
     pub fn matches(&self, t: &Task) -> bool {
-        self.matches_with(t, false)
+        self.matches_with(t)
     }
 
-    pub fn matches_with(&self, t: &Task, overdue_allday_today: bool) -> bool {
+    pub fn matches_with(&self, t: &Task) -> bool {
         if let Some(s) = self.status
             && t.status != s
         {
@@ -141,7 +142,7 @@ impl Filter {
             }
         }
         for f in &self.flags {
-            if !flag_matches(*f, t, overdue_allday_today) {
+            if !flag_matches(*f, t) {
                 return false;
             }
         }
@@ -154,7 +155,7 @@ impl Filter {
     }
 }
 
-fn flag_matches(f: Flag, t: &Task, overdue_allday_today: bool) -> bool {
+fn flag_matches(f: Flag, t: &Task) -> bool {
     match f {
         Flag::Pending => t.status.is_active(),
         Flag::Completed => t.status == TaskStatus::Completed,
@@ -164,6 +165,10 @@ fn flag_matches(f: Flag, t: &Task, overdue_allday_today: bool) -> bool {
         Flag::Untagged => t.tags.is_empty(),
         Flag::Scheduled => t.is_event(),
         Flag::Parent => t.is_parent(),
+        Flag::Waiting => t
+            .wait
+            .zip(task_date(t))
+            .is_some_and(|(w, d)| d + chrono::Duration::seconds(w) > Utc::now()),
         Flag::Overdue => {
             let Some(d) = task_date(t) else {
                 return false;
@@ -173,13 +178,10 @@ fn flag_matches(f: Flag, t: &Task, overdue_allday_today: bool) -> bool {
             }
             if t.allday {
                 // Date-only (all-day) task: compare local calendar days.
+                // Overdue starts the day AFTER the due day.
                 let due_day = d.with_timezone(&Local).date_naive();
                 let today = Local::now().date_naive();
-                if overdue_allday_today {
-                    today >= due_day
-                } else {
-                    today > due_day
-                }
+                today > due_day
             } else {
                 d < Utc::now()
             }
@@ -456,6 +458,7 @@ fn virtual_flag(lname: &str) -> Option<Flag> {
         "untagged" => Some(Flag::Untagged),
         "scheduled" => Some(Flag::Scheduled),
         "parent" => Some(Flag::Parent),
+        "waiting" => Some(Flag::Waiting),
         _ => None,
     }
 }
@@ -626,5 +629,24 @@ mod tests {
         // Not(priority:H)
         let e4 = parse_expr_str("-priority:H").unwrap();
         assert!(e4.matches(&Task::new("work", "x")));
+    }
+
+    #[test]
+    fn waiting_flag_future_hidden_now_visible() {
+        use chrono::{Duration, Utc};
+        let mut t = Task::new("work", "deferred");
+        t.due = Some(Utc::now() + Duration::days(7));
+        // wait = 1 day before due → still waiting now.
+        t.wait = Some(-86_400);
+        let e = parse_expr_str("+WAITING").unwrap();
+        assert!(e.matches(&t));
+        // wait already passed (e.g. due passed long ago) → not waiting.
+        let mut t2 = t.clone();
+        t2.wait = Some(-86_400 * 30);
+        assert!(!e.matches(&t2));
+
+        // Default report exclusion: `-WAITING` must not match waiting tasks.
+        let hide = parse_expr_str("-WAITING").unwrap();
+        assert!(!hide.matches(&t));
     }
 }

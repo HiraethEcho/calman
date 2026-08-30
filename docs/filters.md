@@ -16,6 +16,7 @@ against the **unified** item: todos compare `due`, events compare `dtstart`.
 | `due.by:<date>` | On or before (`<=`). |
 | `due.after:<date>` | On or after (`>=`). |
 | `status:pending\|in-progress\|completed\|cancelled\|recurring\|active` | Lifecycle status (`active` = pending/in-progress; `recurring` = series master). |
+| `+WAITING` / `-WAITING` | Hidden-by-wait: item has a `wait` in the future. Default reports exclude them. |
 | `priority:<lvl>` (alias `pri:<lvl>`) | `high`/`h`/`9`, `medium`/`m`/`5`, `low`/`l`/`1`, or 0–9. |
 | `+tag` / `-tag` | Has / lacks the tag. |
 | `+VIRTUAL` / `-VIRTUAL` | Virtual tag (see below). |
@@ -60,6 +61,7 @@ calman count +OVERDUE
 calman list -status:completed -status:cancelled +TAGGED
 calman list +PARENT              # show recurring series masters
 calman list status:recurring
+calman list +WAITING             # show items hidden by wait
 ```
 
 ## Reports vs. CLI filters

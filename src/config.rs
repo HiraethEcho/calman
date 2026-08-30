@@ -147,13 +147,16 @@ pub struct DateConfig {
     /// End of the working week (`eoww`), e.g. `"17:00"`.
     #[serde(default = "default_workweek_end")]
     pub workweek_end: String,
-    /// Fallback event length when neither `end:` nor `duration:` given (e.g. "1h").
+    /// Day start for named boundaries (`sod`/`sow`/`som`/…), `"HH:MM:SS"`.
+    #[serde(default = "default_day_start")]
+    pub day_start: String,
+    /// Day end for named boundaries (`eod`/`eow`/`eom`/…), `"HH:MM:SS"`.
+    #[serde(default = "default_day_end")]
+    pub day_end: String,
+    /// Fallback event length when neither `end:` nor `duration:` given.
+    /// Empty string ⇒ instant event (DTSTART only, no DTEND).
     #[serde(default = "default_event_duration")]
     pub default_event_duration: String,
-    /// For a date-only `due` (all-day todo), whether it counts as `overdue`
-    /// starting on its own day (`true`) or only after the day passes (`false`).
-    #[serde(default = "default_due_date_overdue_today")]
-    pub due_date_overdue_today: bool,
     /// IANA timezone used when serialising timed `DTSTART`/`DTEND`/`DUE` to ICS
     /// with a `TZID` (iOS-style local wall time). Omitted → auto-detected.
     #[serde(default = "default_timezone")]
@@ -245,12 +248,16 @@ fn default_workweek_end() -> String {
     "17:00".to_string()
 }
 
-fn default_event_duration() -> String {
-    "1h".to_string()
+fn default_day_start() -> String {
+    "00:00:00".to_string()
 }
 
-fn default_due_date_overdue_today() -> bool {
-    false
+fn default_day_end() -> String {
+    "23:59:59".to_string()
+}
+
+fn default_event_duration() -> String {
+    String::new()
 }
 
 fn default_timezone() -> String {
@@ -277,8 +284,9 @@ impl Default for DateConfig {
     fn default() -> Self {
         Self {
             workweek_end: default_workweek_end(),
+            day_start: default_day_start(),
+            day_end: default_day_end(),
             default_event_duration: default_event_duration(),
-            due_date_overdue_today: default_due_date_overdue_today(),
             timezone: default_timezone(),
         }
     }
