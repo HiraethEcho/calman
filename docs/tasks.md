@@ -29,8 +29,8 @@ calman add "conference" start:2026-10-12 allday
 
 - `start:` with a date-only value → all-day event.
 - If neither `end:` nor `duration:` is given, a timed event defaults to
-  `[date].default_event_duration` (default `1h`); an all-day event with no end
-  spans a single day.
+  `[date].default_event_duration`; empty (default) ⇒ instant event (only
+  `DTSTART`, no `DTEND`); an all-day event with no end spans a single day.
 - `allday` (or `+allday`) forces all-day even with a timed `start:`.
 
 ## Attributes

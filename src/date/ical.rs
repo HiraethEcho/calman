@@ -41,23 +41,9 @@ pub fn parse_date_value(input: &str) -> Result<DateValue> {
     // Named dates that are pure day boundaries → date-only.
     const DATE_ONLY_NAMED: &[&str] = &[
         "today",
-        "sod",
         "tomorrow",
         "sond",
         "yesterday",
-        "sow",
-        "soww",
-        "som",
-        "soq",
-        "soy",
-        "sonw",
-        "sonww",
-        "sonm",
-        "sony",
-        "sopw",
-        "sopww",
-        "sopm",
-        "sopy",
     ];
     if DATE_ONLY_NAMED.contains(&s.as_str()) {
         let dt = named_date(&s).expect("named date");

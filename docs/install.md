@@ -75,7 +75,9 @@ write_source = "work"
 # default_report = "next"
 
 [date]
-due_date_overdue_today = false
+# day_start = "00:00:00"      # sod/sow/som/…
+# day_end = "23:59:59"        # eod/eow/eom/…
+# default_event_duration = "" # empty ⇒ instant event
 
 [[source]]
 name = "work"

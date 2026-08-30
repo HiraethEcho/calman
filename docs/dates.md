@@ -19,50 +19,64 @@ A **date-only** `due:` (todo) or `start:` (event) becomes an **all-day** item:
 
 A **timed** value keeps its clock time.
 
-> Overdue rule for all-day todos is **config-driven** — see
-> `[date].due_date_overdue_today` below.
+> Overdue rule for all-day todos is **fixed**: a date-only `due` counts as
+> overdue only after the due day passes (see [Filters](filters.md)).
 
 ## Named dates (date-only → all-day)
 
-These resolve to a calendar day boundary and therefore create all-day items:
+Only these resolve to a **calendar day** (all-day). All-day is expressed by
+`YYYYMMDD` / `YYYY-MM-DD` syntax, never by `s…`/`e…` boundary tokens:
 
 | Token(s) | Meaning |
 | :------- | :------ |
-| `today`, `sod` | start of today (00:00) |
-| `tomorrow`, `sond` | start of tomorrow (00:00) |
-| `yesterday` | start of yesterday (00:00) |
-| `sow`, `soww` | start of this week — Monday 00:00 |
-| `som` | start of this month (1st, 00:00) |
-| `soq` | start of this quarter (1st, 00:00) |
-| `soy` | start of this year (Jan 1, 00:00) |
-| `sonw`, `sonww` | start of next week (next Monday, 00:00) |
-| `sonm` | start of next month (00:00) |
-| `sony` | start of next year (00:00) |
-| `sopw`, `sopww` | start of previous week (prev Monday, 00:00) |
-| `sopm` | start of previous month (00:00) |
-| `sopy` | start of previous year (00:00) |
+| `today` | today (all-day) |
+| `tomorrow`, `sond` | tomorrow (all-day) |
+| `yesterday` | yesterday (all-day) |
+
+## Named date boundaries (timed, configurable)
+
+Start/end boundaries carry a clock time from `[date]`:
+
+- `day_start` (default `00:00:00`) — all `s…` **start** tokens
+- `day_end` (default `23:59:59`) — all `e…` **end** tokens
+
+| Token(s) | Meaning |
+| :------- | :------ |
+| `sod` | start of today (`day_start`) |
+| `sow`, `soww` | start of this week — Monday `day_start` |
+| `som` | start of this month (1st, `day_start`) |
+| `soq` | start of this quarter (1st, `day_start`) |
+| `soy` | start of this year (Jan 1, `day_start`) |
+| `sonw`, `sonww` | start of next week (next Monday, `day_start`) |
+| `sonm` | start of next month (`day_start`) |
+| `sony` | start of next year (`day_start`) |
+| `sopw`, `sopww` | start of previous week (prev Monday, `day_start`) |
+| `sopm` | start of previous month (`day_start`) |
+| `sopy` | start of previous year (`day_start`) |
+| `eod` | end of today (`day_end`) |
+| `eond` | end of next day (tomorrow `day_end`) |
+| `eow` | end of this week — Sunday `day_end` |
+| `eoww` | end of working week — Friday `workweek_end` |
+| `eom` / `eoq` / `eoy` | end of this month / quarter / year (`day_end`) |
+| `eonw` / `eonww` | end of next week (`day_end`) |
+| `eonm` / `eony` | end of next month / year (`day_end`) |
+| `eopw` / `eopww` | end of previous week (`day_end`) |
+| `eopm` / `eopy` | end of previous month / year (`day_end`) |
 
 The week starts on **Monday** (`sow`/`eow`, `soww`/`eoww`).
 
-## Named dates (with time)
+```toml
+[date]
+day_start = "08:00:00"   # sod/sow/som/…
+day_end = "18:30:00"     # eod/eow/eom/…
+workweek_end = "17:00"   # eoww only
+```
 
-These carry a time-of-day and produce **timed** items:
+## Other timed tokens
 
 | Token(s) | Meaning |
 | :------- | :------ |
 | `now` | the current instant |
-| `eod` | end of today (23:59:59) |
-| `eond` | end of next day (tomorrow 23:59:59) |
-| `eow` | end of this week (Sunday 23:59:59) |
-| `eoww` | end of the working week (**Friday `[date].workweek_end`**, default 17:00) |
-| `eonw`, `eonww` | end of next week (next Sunday 23:59:59) |
-| `eopw`, `eopww` | end of previous week (prev Sunday 23:59:59) |
-| `eom` | end of this month (last day, 23:59:59) |
-| `eonm` | end of next month (23:59:59) |
-| `eopm` | end of previous month (23:59:59) |
-| `eoq` | end of this quarter (23:59:59) |
-| `eony` | end of next year (Dec 31, 23:59:59) |
-| `eopy` | end of previous year (23:59:59) |
 
 ## Relative offsets
 
@@ -118,17 +132,9 @@ calman add "wrap up" due:17          # 17th of this month, all-day
 - All-day `due`/`start` lands at local midnight; timed values keep their
   wall-clock time and are converted to UTC for storage.
 
-## `due_date_overdue_today`
+## Overdue
 
-For an all-day todo, "overdue" is governed by `[date].due_date_overdue_today`
-in `config.toml`:
-
-```toml
-[date]
-due_date_overdue_today = false   # default: overdue only after the due day passes
-# due_date_overdue_today = true  # overdue starting on the due day itself
-```
-
-Timed todos are overdue as soon as their `due` instant is in the past,
-regardless of this setting. The `+OVERDUE` virtual tag respects this rule
+For an **all-day** todo, `+OVERDUE` only fires after the due day passes
+(today's due is not overdue). Timed todos are overdue as soon as their `due`
+instant is in the past. The behavior is fixed — there is no config toggle
 (see [Filters](filters.md)).

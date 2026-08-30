@@ -18,8 +18,9 @@ tui = ["work", "personal"]      # Sources shown when `tui` starts
 
 [date]
 workweek_end = "17:00"          # `eoww` = Friday HH:MM (configurable)
-default_event_duration = "1h"
-due_date_overdue_today = false
+day_start = "00:00:00"         # sod/sow/som/…
+day_end = "23:59:59"           # eod/eow/eom/…
+default_event_duration = ""     # empty ⇒ instant event (DTSTART only)
 
 [tui]
 default_filter = "all"          # "todo" | "event" | "all"
@@ -181,7 +182,7 @@ calman modify <TEXT> [ATTRS...] # bare text replaces the summary
         - `alert:<DUR>` — VALARM lead time, e.g. `alert:15min` → `TRIGGER:-PT900S`
         - `location:<TEXT>`, `recur:<RULE>` — recurrence; alias `repeat:`
     - Date‑only `due:` (Todo) is an all‑day todo: stored as `DUE;VALUE=DATE` and
-      `task.allday = true`; overdue rule from `[date] due_date_overdue_today`.
+      `task.allday = true`; all-day overdue is fixed (day after the due day).
     - `recur:`/`repeat:` is normalized to a standard RFC 5545 `RRULE` by
       `recurrence.rs`: raw `FREQ=…` passthrough (always), `text2rrule` natural
       language (`every tuesday`) under `date-natural`, or the built-in friendly
@@ -192,11 +193,12 @@ calman modify <TEXT> [ATTRS...] # bare text replaces the summary
       tag `+PARENT`, hidden from `ls`/`list`/`next` by default; `done` on master
       ⇒ `cancelled`; `modify`/`delete` target the master record.
     - Optional `recur-expand` feature: `list`/`next` expand masters into virtual
-      occurrence rows (`⟳ 2. Sep 01 08:00 standup`); occurrences addressed via
+      occurrence rows (plain sequential IDs); occurrences addressed via
       `on:<date>` or `<id>.<n>`. `done`/`delete` on an occurrence ⇒ `EXDATE`;
       `modify` on an occurrence ⇒ sibling component with same `UID` +
       `RECURRENCE-ID` (iOS Calendar compatible).
-    - No `end:`/`duration:` → `[date] default_event_duration` (default `1h`); all‑day with no end → single day (no `DTEND`).
+    - No `end:`/`duration:` → `[date] default_event_duration`; empty (default)
+      ⇒ instant event (no `DTEND`); all‑day with no end → single day (no `DTEND`).
 
 **Date input forms** (start/end/due): `20260812` (all‑day), `20260812T090000`, `0826T0900` (this year, trailing‑fill), `T0900` (today), `0826` (this year), `25` (this month, trailing‑fill), `YYYY-MM-DD [HH:MM]`, `HH:MM` (today), named dates, `+3d` / `-2w`.
 
@@ -358,7 +360,13 @@ Updated:    2026-08-22 09:15
 ### 6.1 Supported Input Formats
 - **Absolute**: `2026-08-25`, `08/25/2026`, `2026-08-25 14:30`.
 - **Relative offsets**: `+3d` (3 days later), `-2w` (2 weeks ago), `+1m` (1 month), `+1y` (1 year).
-- **Keywords**: `today` (≡ `sod`), `tomorrow`, `yesterday`, `now`, `sod`, `eod`; period bounds `sow`/`eow` (week, Monday 00:00 / Sunday 23:59), `soww`/`eoww` (working week, Monday 00:00 / Friday 17:00), `som`/`eom`, `soq`/`eoq`, `soy`/`eoy`, `sond`/`eond` (next day), `sonw`/`eonw`, `sopw`/`eopw`, `sonm`/`eonm`, `sopm`/`eopm`, `sony`/`eony`, `sopy`/`eopy`.
+- **Keywords**: `today` (all‑day), `tomorrow`, `yesterday`, `now`, `eod`;
+  start boundaries `sod`/`sow`/`soww`/`som`/… use `[date] day_start`;
+  end boundaries `eow`/`eoww`/`eom`/… use `[date] day_end` (`eoww` uses
+  `workweek_end`); period bounds `sow`/`eow` (week, Monday day_start / Sunday
+  day_end), `soww`/`eoww` (working week, Monday day_start / Friday workweek_end),
+  `som`/`eom`, `soq`/`eoq`, `soy`/`eoy`, `sond`/`eond`, `sonw`/`eonw`,
+  `sopw`/`eopw`, `sonm`/`eonm`, `sopm`/`eopm`, `sony`/`eony`, `sopy`/`eopy`.
 - **Compact forms (T-style)**: `20260812` (all‑day), `20260812T090000` (full),
   `0826` / `25` (this year/month, trailing‑fill), `0826T0930` / `25T`
   (this year/month + time), `T0900` (today at 09:00).

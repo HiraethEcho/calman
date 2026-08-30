@@ -30,7 +30,7 @@ offsets like `+3d`.
 
 | Tag | Matches |
 | :-- | :------ |
-| `+OVERDUE` | Date in the past and not completed/cancelled (all-day respects `due_date_overdue_today`). |
+| `+OVERDUE` | Date in the past and not completed/cancelled (all-day due is overdue only after its day). |
 | `+PENDING` / `+ACTIVE` | Active (not completed/cancelled). **Events count as pending.** |
 | `+COMPLETED` / `+DONE` | Completed. |
 | `+CANCELLED` / `+CANCELED` | Cancelled. |

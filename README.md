@@ -43,9 +43,6 @@ include = ["config.default.toml", "colorscheme.example.toml"]
 write_source = "work"
 default_report = "next"
 
-[date]
-due_date_overdue_today = false     # all-day `due` overdue only after its day
-
 [[source]]
 name = "work"
 type = "jsonl"
