@@ -15,7 +15,20 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         let src = resolve_source(conf, &tgt.source)?;
         let mut st = open_storage(conf, &src)?;
         if let Some(occ) = tgt.occ_date {
-            // Deleting one occurrence excludes it from the series (EXDATE).
+            // Deleting one occurrence excludes it from the series (EXDATE) and
+            // drops any per-occurrence override for the same slot.
+            let orphan: Vec<String> = st
+                .list()
+                .iter()
+                .filter(|t| {
+                    t.parent_uid.as_deref() == Some(tgt.uid.as_str())
+                        && t.recurrence_id == Some(occ)
+                })
+                .map(|t| t.uid.clone())
+                .collect();
+            for uid in orphan {
+                st.remove(&uid)?;
+            }
             st.update(&tgt.uid, |t| {
                 if !t.exdates.contains(&occ) {
                     t.exdates.push(occ);

@@ -24,6 +24,11 @@ impl IcsStorage {
         fs::create_dir_all(location)
             .with_context(|| format!("create storage dir {}", location.display()))?;
         let mut tasks = Vec::new();
+        // First pass: read + parse, remap storage uid to the filename, and
+        // record in-file ICS UID -> filename so override `parent_uid`s (which
+        // carry the master's ICS UID) can be resolved to the master's storage
+        // key below (external CalDAV files may use a filename ≠ UID).
+        let mut uid_to_file: std::collections::HashMap<String, String> = Default::default();
         let entries =
             fs::read_dir(location).with_context(|| format!("read dir {}", location.display()))?;
         for entry in entries {
@@ -32,17 +37,27 @@ impl IcsStorage {
             if path.extension().and_then(|e| e.to_str()) != Some("ics") {
                 continue;
             }
-            if let Ok(content) = fs::read_to_string(&path)
-                && let Ok(mut task) = parse_ics(&content)
-            {
-                // Storage key = filename (one task per file). The ICS UID
-                // inside stays the master's for overrides (RECURRENCE-ID
-                // semantics); using the filename avoids master/override
-                // UID collisions in `update`/`remove` lookups.
-                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    task.uid = stem.to_string();
+            if let Ok(content) = fs::read_to_string(&path) {
+                match parse_ics(&content) {
+                    Ok(mut task) => {
+                        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                            uid_to_file.insert(task.uid.clone(), stem.to_string());
+                            task.uid = stem.to_string();
+                        }
+                        tasks.push(task);
+                    }
+                    Err(e) => eprintln!(
+                        "warning: skipping unparseable {}: {e}",
+                        path.display()
+                    ),
                 }
-                tasks.push(task);
+            }
+        }
+        for t in &mut tasks {
+            if let Some(pid) = &t.parent_uid
+                && let Some(key) = uid_to_file.get(pid)
+            {
+                t.parent_uid = Some(key.clone());
             }
         }
         Ok(IcsStorage {
@@ -152,6 +167,12 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
             status_to_ics(task.status)
         }
     ));
+    // VEVENT only permits TENTATIVE/CONFIRMED/CANCELLED, so calman's own
+    // Completed/InProgress would round-trip as Pending; persist them in a
+    // private property (ignored by other clients).
+    if component == "VEVENT" && matches!(task.status, TaskStatus::Completed | TaskStatus::InProgress) {
+        props.push(format!("X-CALMAN-STATUS:{}", status_to_ics(task.status)));
+    }
     // iPhone/standard clients expect explicit transparency on events.
     if component == "VEVENT" {
         props.push("TRANSP:OPAQUE".to_string());
@@ -294,8 +315,10 @@ pub fn parse_ics(content: &str) -> Result<Task> {
             "SUMMARY" => summary = unescape_text(value),
             "DESCRIPTION" => description = Some(unescape_text(value)),
             "STATUS" => status = status_from_ics(value),
+            "X-CALMAN-STATUS" => status = status_from_ics(value),
             "PRIORITY" => priority = value.parse().ok(),
-            "CATEGORIES" => tags = value.split(',').map(unescape_text).collect(),
+            // Unescape first so escaped commas (`\,`) in a tag survive splitting.
+            "CATEGORIES" => tags = unescape_text(value).split(',').map(unescape_text).collect(),
             "DUE" if name.contains("VALUE=DATE") => {
                 allday = true;
                 due = parse_all_day(value);
@@ -331,14 +354,17 @@ pub fn parse_ics(content: &str) -> Result<Task> {
             "RRULE" => rrule = Some(value.to_string()),
             "X-CALMAN-WAIT-OFFSET" => wait = value.trim().parse::<i64>().ok(),
             "EXDATE" => {
+                // RFC 5545 allows a comma-separated list of excluded datetimes.
                 let tz = param_tzid(name);
-                let d = match (&tz, name.contains("VALUE=DATE")) {
-                    (_, true) => parse_all_day(value),
-                    (Some(tz), false) => parse_tz(value, tz),
-                    (None, _) => parse_dt(value),
-                };
-                if let Some(dt) = d {
-                    exdates.push(dt);
+                for v in value.split(',') {
+                    let d = match (&tz, name.contains("VALUE=DATE")) {
+                        (_, true) => parse_all_day(v),
+                        (Some(tz), false) => parse_tz(v, tz),
+                        (None, _) => parse_dt(v),
+                    };
+                    if let Some(dt) = d {
+                        exdates.push(dt);
+                    }
                 }
             }
             "RECURRENCE-ID" => {
@@ -762,6 +788,21 @@ mod tests {
         assert!(out.contains("UID:series-1"));
         assert!(out.contains("RECURRENCE-ID;TZID=Asia/Shanghai:"));
         assert!(!out.contains("RRULE:"));
+    }
+
+    #[test]
+    fn vevent_completed_roundtrips_via_xcalman_status() {
+        let mut t = Task::new("work", "done event");
+        t.event = true;
+        t.status = TaskStatus::Completed;
+        t.dtstart = Some(chrono::Utc::now());
+        let out = render_ics(&t, chrono_tz::Tz::UTC).unwrap();
+        // VEVENT STATUS stays CONFIRMED (RFC legal), private prop keeps state.
+        assert!(out.contains("STATUS:CONFIRMED"));
+        assert!(out.contains("X-CALMAN-STATUS:COMPLETED"));
+        let rt = parse_ics(&out).unwrap();
+        assert_eq!(rt.status, TaskStatus::Completed);
+        assert!(rt.event);
     }
 
     #[test]

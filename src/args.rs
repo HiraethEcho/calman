@@ -83,6 +83,13 @@ enum Capture {
 }
 
 /// True if `t` begins a recognised attribute token — used to end capture mode.
+/// Case-insensitive prefix strip (ASCII-safe for a locale-independent match).
+fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+    let n = prefix.len();
+    (s.len() >= n && s.get(..n).is_some_and(|p| p.eq_ignore_ascii_case(prefix)))
+        .then(|| &s[n..])
+}
+
 fn is_attr_token(t: &str) -> bool {
     let l = t.to_ascii_lowercase();
     l.starts_with("rc.")
@@ -192,9 +199,9 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
             .or_else(|| lower.strip_prefix("pri:"))
         {
             q.priority = Some(parse_priority(rest)?);
-        } else if let Some(rest) = lower.strip_prefix("source:").or_else(|| lower.strip_prefix("src:")) {
+        } else if let Some(len) = strip_prefix_ci(&lower, "source:").map(|_| 7).or_else(|| strip_prefix_ci(&lower, "src:").map(|_| 4)) {
             q.sources
-                .extend(rest.split(',').map(|s| s.trim().to_string()));
+                .extend(tok[len..].split(',').map(|s| s.trim().to_string()));
         } else if let Some(rest) = lower.strip_prefix("due:") {
             let dv = parse_date_value(rest)?;
             let dtv = match dv {
@@ -307,12 +314,15 @@ fn is_virtual_tag(l: &str) -> bool {
 fn is_filter_only_minus(name: &str) -> bool {
     let l = name.to_ascii_lowercase();
     is_virtual_tag(&l)
-        || l.starts_with("status:")
-        || l.starts_with("source:")
-        || l.starts_with("type:")
-        || l.starts_with("priority:")
-        || l.starts_with("pri:")
-        || l.starts_with("due")
+        || strip_prefix_ci(&l, "status:").is_some()
+        || strip_prefix_ci(&l, "source:").is_some()
+        || strip_prefix_ci(&l, "src:").is_some()
+        || strip_prefix_ci(&l, "type:").is_some()
+        || strip_prefix_ci(&l, "priority:").is_some()
+        || strip_prefix_ci(&l, "pri:").is_some()
+        || strip_prefix_ci(&l, "date").is_some()
+        || strip_prefix_ci(&l, "start").is_some()
+        || strip_prefix_ci(&l, "due").is_some()
 }
 
 fn parse_rc(tok: &str) -> Result<Option<RcReport>> {

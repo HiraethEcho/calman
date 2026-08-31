@@ -270,24 +270,24 @@ fn expand_occurrences(rows: &mut Vec<Row>, conf: &Config) {
         for occ in occs {
             let override_task = ovs.and_then(|m| m.get(&occ.occurrence_start)).cloned();
             let mut t = override_task.clone().unwrap_or_else(|| occ.master.clone());
-            // Virtual occurrences get marked with the master's uid so
-            // `is_parent()`/`+PARENT` never match them; stored overrides
-            // already carry it. A virtual occurrence from the template is a
-            // single active instance; a stored override keeps its own status.
             if override_task.is_none() {
+                // Virtual occurrence from the template: single active instance
+                // dated at its own slot. Marked with the master's uid so
+                // `is_parent()`/`+PARENT` never match it.
                 t.parent_uid = Some(r.task.uid.clone());
                 t.status = TaskStatus::Pending;
+                if t.is_event() {
+                    let delta =
+                        occ.occurrence_start - t.dtstart.unwrap_or(occ.occurrence_start);
+                    t.dtstart = Some(occ.occurrence_start);
+                    t.dtend = t.dtend.map(|e| e + delta);
+                } else {
+                    t.due = Some(occ.occurrence_start);
+                }
+                // Effective creation time = its own date (ID ordering).
+                t.created_at = occ.occurrence_start;
             }
-            if t.is_event() {
-                let delta = occ.occurrence_start - t.dtstart.unwrap_or(occ.occurrence_start);
-                t.dtstart = Some(occ.occurrence_start);
-                t.dtend = t.dtend.map(|e| e + delta);
-            } else {
-                t.due = Some(occ.occurrence_start);
-            }
-            // An occurrence's effective creation time is its own date
-            // (per-period), so the ID ordering below interleaves it correctly.
-            t.created_at = occ.occurrence_start;
+            // Stored overrides keep their own date/status (reschedule/completed).
             extra.push(Row {
                 id: r.id,
                 source: r.source.clone(),
@@ -431,14 +431,21 @@ fn target_from_row(
     occ_date: Option<DateTime<Utc>>,
 ) -> Result<OccurrenceTarget> {
     if row.occ.is_some() {
-        // A virtual occurrence row: target that single occurrence.
+        // A virtual occurrence row: target that single occurrence, addressed
+        // through its parent series (stored overrides keep their own storage
+        // uid, so resolve to the master's uid).
         let occ = row
             .task
             .dtstart
             .or(row.task.due)
             .ok_or_else(|| anyhow::anyhow!("occurrence `{id}` has no date"))?;
+        let uid = row
+            .task
+            .parent_uid
+            .clone()
+            .unwrap_or_else(|| row.task.uid.clone());
         return Ok(OccurrenceTarget {
-            uid: row.task.uid.clone(),
+            uid,
             source: row.source.clone(),
             occ_date: Some(occ),
         });

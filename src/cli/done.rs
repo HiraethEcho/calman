@@ -17,7 +17,8 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         let mut st = open_storage(conf, &src)?;
         if let Some(occ) = tgt.occ_date {
             // Completing one occurrence records a Completed override sibling
-            // (visible as a done item), not a silent EXDATE skip.
+            // (visible as a done item), updating an existing override if the
+            // same occurrence was already modified.
             let master = st
                 .list()
                 .iter()
@@ -27,10 +28,23 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
             if !master.is_parent() {
                 bail!("task `{}` is not a recurring parent", tgt.uid);
             }
-            let mut ov =
-                crate::cli::override_for_occurrence(&master, occ, TaskStatus::Completed);
-            ov.completed_at = Some(chrono::Utc::now());
-            st.add(ov)?;
+            let existing = st.list().iter().find(|t| {
+                t.parent_uid.as_deref() == Some(tgt.uid.as_str())
+                    && t.recurrence_id == Some(occ)
+            });
+            if let Some(e) = existing {
+                let uid = e.uid.clone();
+                st.update(&uid, |t| {
+                    t.status = TaskStatus::Completed;
+                    t.completed_at = Some(chrono::Utc::now());
+                    Ok(())
+                })?;
+            } else {
+                let mut ov =
+                    crate::cli::override_for_occurrence(&master, occ, TaskStatus::Completed);
+                ov.completed_at = Some(chrono::Utc::now());
+                st.add(ov)?;
+            }
         } else {
             st.update(&tgt.uid, |t| {
                 if t.is_parent() {

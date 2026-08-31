@@ -661,8 +661,10 @@ fn rule_matches(key: &str, parents: &HashSet<&str>, r: &Row) -> bool {
         "overdue" => crate::filter::task_date(t).is_some_and(|d| {
             d.with_timezone(&Local).date_naive() < Local::now().date_naive()
         }) && !t.status.is_done(),
-        "today" => t.due.is_some_and(|d| d.with_timezone(&Local).date_naive() == Local::now().date_naive()),
-        "due" => t.due.is_some(),
+        "today" => crate::filter::task_date(t).is_some_and(|d| {
+            d.with_timezone(&Local).date_naive() == Local::now().date_naive()
+        }),
+        "due" => crate::filter::task_date(t).is_some(),
         "cancelled" => t.status == TaskStatus::Cancelled,
         "blocked" => parents.contains(t.uid.as_str()),
         "blocking" => t.related_to.is_some(),

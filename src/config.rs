@@ -65,8 +65,9 @@ impl Source {
 }
 
 /// `[defaults]` — the default write target and report for `add` / bare `calman`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Defaults {
+    #[serde(default = "default_write_source")]
     pub write_source: String,
     /// Name of the default report run by bare `calman` (default `next`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -75,6 +76,20 @@ pub struct Defaults {
     /// `list`/`next` (recur-expand). `0` = all future within the window.
     #[serde(default = "default_recur_expand_count")]
     pub recur_expand_count: usize,
+}
+
+impl Default for Defaults {
+    fn default() -> Self {
+        Self {
+            write_source: "work".to_string(),
+            default_report: None,
+            recur_expand_count: default_recur_expand_count(),
+        }
+    }
+}
+
+fn default_write_source() -> String {
+    "work".to_string()
 }
 
 fn default_recur_expand_count() -> usize {
@@ -512,6 +527,26 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn defaults_missing_write_source_falls_back_to_work() {
+        // A user config with sources but no [defaults] table must still resolve
+        // write_source; otherwise `add` breaks with "unknown write source"".
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[[source]]\nname = \"main\"\ntype = \"jsonl\"\nlocation = \"~/.local/share/calman/main/\"\n",
+        )
+        .unwrap();
+        let cfg = Config::load_from(&path).unwrap();
+        assert_eq!(cfg.write_source(), "work");
+        // Empty [defaults] table likewise.
+        let path2 = dir.path().join("config2.toml");
+        std::fs::write(&path2, "[defaults]\n").unwrap();
+        let cfg2 = Config::load_from(&path2).unwrap();
+        assert_eq!(cfg2.write_source(), "work");
     }
 
     #[test]

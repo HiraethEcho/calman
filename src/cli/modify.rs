@@ -123,10 +123,22 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
             if !master.is_parent() {
                 bail!("task `{}` is not a recurring parent", tgt.uid);
             }
-            let mut ov =
-                crate::cli::override_for_occurrence(&master, occ, TaskStatus::Pending);
-            apply(&mut ov, &upd)?;
-            st.add(ov)?;
+            // Re-modifying the same occurrence updates its override instead of
+            // stacking duplicate siblings.
+            let existing = st.list().iter().find(|t| {
+                t.parent_uid.as_deref() == Some(tgt.uid.as_str())
+                    && t.recurrence_id == Some(occ)
+            });
+            if let Some(e) = existing {
+                let uid = e.uid.clone();
+                st.update(&uid, |t| apply(t, &upd))?
+                    .ok_or_else(|| anyhow::anyhow!("task `{}` disappeared", tgt.uid))?;
+            } else {
+                let mut ov =
+                    crate::cli::override_for_occurrence(&master, occ, TaskStatus::Pending);
+                apply(&mut ov, &upd)?;
+                st.add(ov)?;
+            }
         } else {
             st.update(&tgt.uid, |t| apply(t, &upd))?
             .ok_or_else(|| anyhow::anyhow!("task `{}` disappeared", tgt.uid))?;
@@ -190,6 +202,10 @@ fn apply(t: &mut Task, u: &Upd) -> Result<()> {
     }
     if let Some(v) = &u.repeat {
         t.rrule = Some(crate::recurrence::normalize_recurrence(v)?);
+        // Adding a recurrence promotes an active item to series master.
+        if t.status.is_active() {
+            t.status = crate::model::TaskStatus::Recurring;
+        }
     }
     if let Some(v) = &u.description {
         t.description = Some(v.clone());

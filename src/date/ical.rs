@@ -144,12 +144,20 @@ fn resolve_compact_date(digits: &str, now: DateTime<Local>) -> Result<NaiveDate>
 /// Digits are `HH[MM[SS]]` (left-aligned, zero-padded): `09`→09:00:00,
 /// `0930`→09:30:00, `090000`→full, empty→00:00:00.
 fn resolve_compact_time(digits: &str) -> Result<NaiveTime> {
-    if digits.is_empty() {
+    // Accept colon forms (`09:30`, `9:30`) — strip separators, left-aligned
+    // `HH[MM[SS]]`; 3 digits mean `HMM` (`930` → 09:30), not 93 hours.
+    let cleaned: String = digits.chars().filter(|c| *c != ':').collect();
+    let cleaned = if cleaned.len() == 3 {
+        format!("0{cleaned}")
+    } else {
+        cleaned
+    };
+    if cleaned.is_empty() {
         return Ok(NaiveTime::from_hms_opt(0, 0, 0).unwrap());
     }
-    let hh = digits.get(..2).and_then(|x| x.parse::<u32>().ok()).unwrap_or(0);
-    let mm = digits.get(2..4).and_then(|x| x.parse::<u32>().ok()).unwrap_or(0);
-    let ss = digits.get(4..6).and_then(|x| x.parse::<u32>().ok()).unwrap_or(0);
+    let hh = cleaned.get(..2).and_then(|x| x.parse::<u32>().ok()).unwrap_or(0);
+    let mm = cleaned.get(2..4).and_then(|x| x.parse::<u32>().ok()).unwrap_or(0);
+    let ss = cleaned.get(4..6).and_then(|x| x.parse::<u32>().ok()).unwrap_or(0);
     NaiveTime::from_hms_opt(hh, mm, ss).ok_or_else(|| anyhow::anyhow!("bad time `{digits}`"))
 }
 
@@ -483,6 +491,19 @@ mod tests {
         // 260823 → YYMMDD
         let d = resolve_compact_date("260823", Local::now()).unwrap();
         assert_eq!(d, NaiveDate::from_ymd_opt(2026, 8, 23).unwrap());
+    }
+
+    #[test]
+    fn t_colon_time_parses() {
+        // `20260826T09:30` / `0826T09:30` / `T09:30` → 09:30
+        for (s, wanted) in [("20260826T09:30", "093000"), ("0826T0930", "093000"), ("T9:30", "093000")] {
+            let d = parse_date_value(s).unwrap();
+            let t = match d {
+                DateValue::Time(dt) => dt.with_timezone(&Local),
+                _ => panic!("expected time: {s}"),
+            };
+            assert_eq!(t.format("%H%M%S").to_string(), wanted, "{s}");
+        }
     }
 
     #[test]

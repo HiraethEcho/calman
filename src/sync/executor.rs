@@ -12,6 +12,9 @@ use std::process::Command;
 /// Lock file name created inside a source location during sync.
 pub const LOCK_FILE: &str = ".sync.lock";
 
+/// A lock older than this (seconds) is assumed stale (crashed run).
+const STALE_LOCK_SECS: u64 = 600;
+
 /// Run the configured sync chain for one source.
 ///
 /// `{location}` and `{name}` placeholders are substituted before execution;
@@ -19,13 +22,29 @@ pub const LOCK_FILE: &str = ".sync.lock";
 pub fn run_sync(location: &Path, name: &str, sync: &SyncConfig) -> Result<()> {
     fs::create_dir_all(location).with_context(|| format!("create dir {}", location.display()))?;
     let lock = location.join(LOCK_FILE);
-    if lock.exists() {
-        bail!(
-            "sync already in progress for source `{name}` ({})",
-            lock.display()
-        );
-    }
-    fs::write(&lock, "")?;
+    // Atomic lock creation + stale-lock recovery: if the lock survives past
+    // the sync duration, a crashed run left it behind — take it over.
+    match fs::OpenOptions::new().write(true).create_new(true).open(&lock) {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            let stale = fs::metadata(&lock)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|m| m.elapsed().ok())
+                .map(|d| d.as_secs() > STALE_LOCK_SECS)
+                .unwrap_or(false);
+            if !stale {
+                bail!(
+                    "sync already in progress for source `{name}` ({})",
+                    lock.display()
+                );
+            }
+            eprintln!("warning: removing stale sync lock {}", lock.display());
+            let _ = fs::remove_file(&lock);
+            fs::write(&lock, "")?;
+        }
+        Err(e) => return Err(e).with_context(|| format!("create lock {}", lock.display())),
+    };
 
     let result = (|| -> Result<()> {
         let hooks: [(&str, &Option<String>); 3] = [
