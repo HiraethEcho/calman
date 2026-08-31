@@ -4,8 +4,10 @@ pub mod add;
 pub mod count;
 pub mod delete;
 pub mod done;
+pub mod info;
 pub mod list;
 pub mod modify;
+pub mod series;
 pub mod sync;
 #[cfg(feature = "tui")]
 pub mod tui;
@@ -43,6 +45,7 @@ COMMANDS
   calman done <id>               mark completed
   calman delete <id>             hard delete
   calman modify <id> [opts]      change fields
+  calman info <id> | <id> info   show full details
   calman count [filter]          print number of matches
   calman sync [source]           run external sync command
   calman help | filters          show this cheat-sheet
@@ -70,6 +73,7 @@ RECURRENCE (recur: / repeat:)  → standard RFC 5545 RRULE
   weekdays         : every tuesday and friday | every weekend (→ BYDAY)
   end              : for 5 times | for 7 weeks (weeks×weekday→COUNT)
                      | count:5 | until:20260925 | until:eoy | until:eom
+                     (`count:`/`until:` may be separate tokens: recur:daily count:5)
   e.g. every tuesday and friday for 7 weeks
        → FREQ=WEEKLY;BYDAY=TU,FR;COUNT=14
   series model     : master = status:recurring, virtual tag +PARENT
@@ -78,6 +82,10 @@ RECURRENCE (recur: / repeat:)  → standard RFC 5545 RRULE
                      delete <id> on:<date> → EXDATE (skip one)
                      modify <id>.<n> … → RECURRENCE-ID override (same UID)
                      expanded rows carry plain IDs; `done 5` targets one occurrence
+                     `all-future` keyword on modify/delete an occurrence:
+                       modify → split series (old keeps past, new edited series starts here)
+                       delete → truncate series (this occurrence and all later removed)
+                     interactive prompt (TTY) asks first; non-TTY defaults to single
 
 DATE-ONLY DUE (fixed overdue policy)
   a date-only `due` is owed only AFTER its day passes (today's due is not overdue)
@@ -258,6 +266,18 @@ fn expand_occurrences(rows: &mut Vec<Row>, conf: &Config) {
             continue;
         }
         let occs = expand_task(&r.task, after, before);
+        let ovs = overrides.get(&r.task.uid);
+        // Skip occurrences that already have a completed/cancelled override so
+        // the first "slots" show the next actionable instance — otherwise a
+        // finished occurrence whose time is still ahead keeps occupying the
+        // `recur_expand_count` budget.
+        let occs: Vec<_> = occs
+            .into_iter()
+            .filter(|oc| match ovs.and_then(|m| m.get(&oc.occurrence_start)) {
+                Some(ov) => !ov.status.is_done(),
+                None => true,
+            })
+            .collect();
         let occs: Vec<_> = if conf.defaults.recur_expand_count == 0 {
             occs
         } else {
@@ -266,7 +286,6 @@ fn expand_occurrences(rows: &mut Vec<Row>, conf: &Config) {
                 .take(conf.defaults.recur_expand_count)
                 .collect()
         };
-        let ovs = overrides.get(&r.task.uid);
         for occ in occs {
             let override_task = ovs.and_then(|m| m.get(&occ.occurrence_start)).cloned();
             let mut t = override_task.clone().unwrap_or_else(|| occ.master.clone());
@@ -540,6 +559,22 @@ pub fn resolve_targets(
         .collect())
 }
 
+/// Prompt the user (TTY only) for a yes/no decision; non-interactive input
+/// falls back to `false` (single occurrence). Use the `all-future` keyword to
+/// force `true` from scripts.
+pub fn confirm(prompt: &str) -> Result<bool> {
+    use std::io::{IsTerminal, Write};
+    if !std::io::stdin().is_terminal() {
+        return Ok(false);
+    }
+    eprint!("{prompt} [y/N] ");
+    std::io::stderr().flush()?;
+    let mut line = String::new();
+    std::io::stdin().read_line(&mut line)?;
+    let t = line.trim().to_ascii_lowercase();
+    Ok(t == "y" || t == "yes")
+}
+
 #[cfg(all(test, feature = "storage-jsonl"))]
 mod tests {
     use super::*;
@@ -573,6 +608,44 @@ mod tests {
         assert_eq!(rows[0].task.summary, "older");
         assert_eq!(rows[1].id, 2);
         assert_eq!(rows[1].task.summary, "newer");
+    }
+
+    #[cfg(feature = "recur-expand")]
+    #[test]
+    fn expansion_skips_done_occurrences() {
+        use crate::model::TaskStatus;
+        use chrono::{Duration, Utc};
+        let dir = tempdir().unwrap();
+        let mut st = crate::storage::jsonl::JsonlStorage::open(dir.path()).unwrap();
+        let now = Utc::now();
+        // Recurring daily todo: first occurrence is one hour ahead.
+        let mut master = Task::new("work", "daily");
+        master.due = Some(now + Duration::hours(1));
+        master.rrule = Some("FREQ=DAILY".into());
+        master.status = TaskStatus::Recurring;
+        st.add(master).unwrap();
+        // Complete the first occurrence exactly like `done <id>` does.
+        let master = st.list()[0].clone();
+        // Expand first to get the exact (second-truncated) occurrence stamp.
+        let occ = crate::recur_expand::expand_task(
+            &master,
+            now - Duration::days(1),
+            now + Duration::days(366),
+        )
+        .first()
+        .unwrap()
+        .occurrence_start;
+        let ov = super::override_for_occurrence(&master, occ, TaskStatus::Completed);
+        st.add(ov).unwrap();
+        drop(st);
+
+        let rows =
+            load_merged_expanded(&Config::default(), &[source(dir.path(), "work")]).unwrap();
+        // The next occurrence (tomorrow) is the one shown, not the completed one.
+        let occ_rows: Vec<_> = rows.iter().filter(|r| r.occ.is_some()).collect();
+        assert_eq!(occ_rows.len(), 1);
+        assert_eq!(occ_rows[0].task.due, Some(occ + Duration::days(1)));
+        assert_eq!(occ_rows[0].task.status, TaskStatus::Pending);
     }
 
     #[cfg(feature = "recur-expand")]

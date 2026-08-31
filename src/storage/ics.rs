@@ -41,7 +41,14 @@ impl IcsStorage {
                 match parse_ics(&content) {
                     Ok(mut task) => {
                         if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                            uid_to_file.insert(task.uid.clone(), stem.to_string());
+                            // Master files (no RECURRENCE-ID) win the UID→file
+                            // map: overrides reuse the master's ICS UID and must
+                            // not shadow the master's storage key.
+                            if task.recurrence_id.is_none()
+                                || !uid_to_file.contains_key(&task.uid)
+                            {
+                                uid_to_file.insert(task.uid.clone(), stem.to_string());
+                            }
                             task.uid = stem.to_string();
                         }
                         tasks.push(task);
@@ -858,5 +865,44 @@ mod tests {
         let s = "a\\b\nline2;comma,ok";
         let esc = escape_text(s);
         assert_eq!(unescape_text(&esc), s);
+    }
+
+    #[test]
+    fn override_does_not_shadow_master_in_uid_map() {
+        // Override files reuse the master's ICS UID. `open` must resolve the
+        // override's parent_uid to the master's storage key (filename), not to
+        // the override's own file — otherwise per-occurrence skip/filtering
+        // breaks (completed occurrence keeps showing as pending).
+        let dir = tempdir().unwrap();
+        let master = concat!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\n",
+            "UID:same-uid\r\nSUMMARY:series\r\n",
+            "DUE;TZID=Asia/Shanghai:20260831T220000\r\n",
+            "RRULE:FREQ=DAILY;COUNT=5\r\n",
+            "DTSTAMP:20260831T120000Z\r\nEND:VTODO\r\nEND:VCALENDAR\r\n",
+        );
+        let override_ = concat!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\n",
+            "UID:same-uid\r\nSUMMARY:series\r\nSTATUS:COMPLETED\r\n",
+            "DUE;TZID=Asia/Shanghai:20260831T220000\r\n",
+            "RECURRENCE-ID;TZID=Asia/Shanghai:20260831T220000\r\n",
+            "DTSTAMP:20260831T120100Z\r\nEND:VTODO\r\nEND:VCALENDAR\r\n",
+        );
+        std::fs::write(dir.path().join("a-master.ics"), master).unwrap();
+        std::fs::write(dir.path().join("z-override.ics"), override_).unwrap();
+
+        let st = IcsStorage::open(dir.path(), Tz::UTC).unwrap();
+        let mv = st
+            .list()
+            .iter()
+            .find(|t| t.recurrence_id.is_none())
+            .unwrap();
+        let ov = st
+            .list()
+            .iter()
+            .find(|t| t.recurrence_id.is_some())
+            .unwrap();
+        assert_eq!(mv.uid, "a-master");
+        assert_eq!(ov.parent_uid.as_deref(), Some("a-master"));
     }
 }

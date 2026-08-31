@@ -90,10 +90,14 @@ calman delete <ID> [ID...]
 ```
 
 Permanently removes the item from storage (hard delete; no CalDAV mapping for
-deletion).
+deletion). Deleting an occurrence (`id.n` / `on:<date>`) removes just that one
+(after a TTY prompt, answered no = single, yes = this and all future ones);
+use `all-future` to skip the prompt.
 
 ```sh
 calman delete 2
+calman delete 5.2                # delete one occurrence (asks first)
+calman delete 5.2 all-future     # truncate the series here (non-interactive)
 ```
 
 ---
@@ -115,11 +119,38 @@ calman 2 modify +urgent status:in-progress
 calman 3 modify from:tomorrow allday    # convert to an all-day event
 ```
 
+Modifying an occurrence (`id.n`) edits only that instance (override record)
+after a TTY prompt answers no; answering yes — or passing `all-future` —
+splits the series: the old master keeps every occurrence up to this one, and a
+new edited series starts here (new UID).
+
+```sh
+calman 5.2 modify summary:renamed all-future   # split + edit from occurrence 2
+```
+
 Notes:
 - `+allday` converts the target to all-day (drops times and `DTEND`); any
   `from:` makes it a timed event again. There is no `-allday`.
 - A date-only `from:` on `modify` makes the event all-day (local midnight, no
   implicit hour) — the same as `add`.
+
+---
+
+## `info` — show full details
+
+```sh
+calman info <ID> [ID...]
+calman <ID>... info
+```
+
+Prints every stored field for each item (status, dates, recurrence, tags,
+priority, location, description, alert, relations, timestamps, UID). Works
+with plain IDs, `id.n` occurrences and UIDs.
+
+```sh
+calman 3 info
+calman info 1.2      # details of one occurrence
+```
 
 ---
 

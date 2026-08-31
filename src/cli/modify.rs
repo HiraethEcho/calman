@@ -11,7 +11,7 @@ use crate::date::{
     DateValue, local_midnight, parse_date_value, parse_duration, resolve_end,
 };
 use crate::model::{Task, TaskStatus};
-use crate::storage::Storage;
+use crate::storage::{Storage, Store};
 use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, Local, Utc};
 
@@ -123,6 +123,19 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
             if !master.is_parent() {
                 bail!("task `{}` is not a recurring parent", tgt.uid);
             }
+            let occ_day = occ
+                .with_timezone(&Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string();
+            if q.apply_all_future
+                || crate::cli::confirm(&format!(
+                    "apply change to ALL FUTURE occurrences from {occ_day}?"
+                ))?
+            {
+                split_series(&mut st, &master, occ, &upd)?;
+                println!("split series {}", q.ids.join(", "));
+                continue;
+            }
             // Re-modifying the same occurrence updates its override instead of
             // stacking duplicate siblings.
             let existing = st.list().iter().find(|t| {
@@ -145,6 +158,88 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         }
     }
     println!("modified: {}", q.ids.join(", "));
+    Ok(())
+}
+
+/// Split a recurring series at an occurrence, applying `upd` to a new
+/// successor series that starts there. The old master keeps every occurrence
+/// before `occ`; when `occ` is the series' first occurrence the old master is
+/// deleted outright.
+fn split_series(
+    st: &mut Store,
+    master: &Task,
+    occ: DateTime<Utc>,
+    upd: &Upd,
+) -> Result<()> {
+    let Some(idx) = crate::cli::series::absolute_index(master, occ) else {
+        bail!("`{occ}` is not a recurring occurrence of `{}`", master.summary);
+    };
+
+    // Drop any existing override at this slot; the successor carries the edit.
+    let ovs: Vec<String> = st
+        .list()
+        .iter()
+        .filter(|t| {
+            t.parent_uid.as_deref() == Some(master.uid.as_str())
+                && t.recurrence_id == Some(occ)
+        })
+        .map(|t| t.uid.clone())
+        .collect();
+    for u in ovs {
+        st.remove(&u)?;
+    }
+
+    // Successor series: same content as the old master, but the first
+    // occurrence is `occ` (unless the user set a new date) and it gets a new
+    // UID / identity.
+    let mut nm = master.clone();
+    nm.uid = uuid::Uuid::new_v4().to_string();
+    nm.parent_uid = None;
+    nm.recurrence_id = None;
+    let had_from = upd.from.is_some();
+    let had_due = upd.due.is_some();
+    apply(&mut nm, upd)?;
+    if !had_from && nm.is_event() {
+        let s = nm.dtstart.ok_or_else(|| {
+            anyhow::anyhow!("event `{}` has no start", nm.summary)
+        })?;
+        let delta = occ - s;
+        nm.dtstart = Some(occ);
+        nm.dtend = nm.dtend.map(|e| e + delta);
+    } else if !had_due && !nm.is_event() {
+        nm.due = Some(occ);
+    }
+    // A bounded original COUNT keeps counting from the new start.
+    if upd.repeat.is_none()
+        && let Some(rr) = master.rrule.as_deref()
+        && let Some(rem) = crate::cli::series::remaining_count(rr, idx)
+    {
+        nm.rrule = Some(crate::cli::series::set_count(rr, rem));
+    }
+    st.add(nm)?;
+
+    // Truncate the old master before this occurrence.
+    let mut mm = master.clone();
+    let delete_old = crate::cli::series::truncate_before(&mut mm, occ)?;
+    if delete_old {
+        let all: Vec<String> = st
+            .list()
+            .iter()
+            .filter(|t| t.parent_uid.as_deref() == Some(master.uid.as_str()))
+            .map(|t| t.uid.clone())
+            .collect();
+        for u in all {
+            st.remove(&u)?;
+        }
+        st.remove(&master.uid)?
+            .ok_or_else(|| anyhow::anyhow!("task `{}` disappeared", master.uid))?;
+    } else {
+        st.update(&master.uid, |t| {
+            t.rrule = mm.rrule.clone();
+            Ok(())
+        })?
+        .ok_or_else(|| anyhow::anyhow!("task `{}` disappeared", master.uid))?;
+    }
     Ok(())
 }
 

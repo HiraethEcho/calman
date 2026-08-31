@@ -16,7 +16,63 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         let mut st = open_storage(conf, &src)?;
         if let Some(occ) = tgt.occ_date {
             // Deleting one occurrence excludes it from the series (EXDATE) and
-            // drops any per-occurrence override for the same slot.
+            // drops any per-occurrence override for the same slot — unless the
+            // user asks to delete this and ALL future occurrences, which
+            // truncates the series before this occurrence instead.
+            let master = st
+                .list()
+                .iter()
+                .find(|t| t.uid == tgt.uid)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("task `{}` disappeared", tgt.uid))?;
+            if !master.is_parent() {
+                bail!("task `{}` is not a recurring parent", tgt.uid);
+            }
+            let occ_day = occ
+                .with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string();
+            let all_future = q.apply_all_future
+                || crate::cli::confirm(&format!(
+                    "delete ALL FUTURE occurrences from {occ_day}?"
+                ))?;
+            if all_future {
+                // Drop overrides at or after this occurrence.
+                let ovs: Vec<String> = st
+                    .list()
+                    .iter()
+                    .filter(|t| {
+                        t.parent_uid.as_deref() == Some(tgt.uid.as_str())
+                            && t.recurrence_id.is_some_and(|r| r >= occ)
+                    })
+                    .map(|t| t.uid.clone())
+                    .collect();
+                for u in ovs {
+                    st.remove(&u)?;
+                }
+                let mut m = master.clone();
+                let delete_master = crate::cli::series::truncate_before(&mut m, occ)?;
+                if delete_master {
+                    let all: Vec<String> = st
+                        .list()
+                        .iter()
+                        .filter(|t| t.parent_uid.as_deref() == Some(tgt.uid.as_str()))
+                        .map(|t| t.uid.clone())
+                        .collect();
+                    for u in all {
+                        st.remove(&u)?;
+                    }
+                    st.remove(&tgt.uid)?
+                        .ok_or_else(|| anyhow::anyhow!("task `{}` disappeared", tgt.uid))?;
+                } else {
+                    st.update(&tgt.uid, |t| {
+                        t.rrule = m.rrule.clone();
+                        Ok(())
+                    })?
+                    .ok_or_else(|| anyhow::anyhow!("task `{}` disappeared", tgt.uid))?;
+                }
+                continue;
+            }
             let orphan: Vec<String> = st
                 .list()
                 .iter()

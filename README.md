@@ -85,7 +85,7 @@ calman add "pay" due:eom recur:FREQ=MONTHLY;UNTIL=20261231
 - frequency: `daily weekly monthly yearly`
 - interval: `every 7d` / `7d` / `every 2 weeks`
 - weekdays: `every tuesday and friday` / `every weekend`
-- series end: `for 5 times` / `for 7 weeks` / `count:5` / `until:20260925` / `until:eoy` / `until:eom`
+- series end: `for 5 times` / `for 7 weeks` / `count:5` / `until:20260925` / `until:eoy` / `until:eom` (and as separate tokens: `recur:daily count:5`)
 - raw passthrough: `recur:FREQ=WEEKLY;BYDAY=TU,FR`
 - ISO 8601 period: `recur:P7D` → `FREQ=DAILY;INTERVAL=7` (also `P2W`/`P1M`/`P1Y`)
 - natural language (default build): `recur:"every tuesday"`
@@ -103,7 +103,12 @@ address one via its plain ID, `on:<date>`, or `<id>.<n>`:
 ```sh
 calman done 5.2                 # complete one occurrence → Completed override record
 calman modify 5.1 summary:x     # override occurrence → RECURRENCE-ID sibling
+calman info 5.2                 # full details of one occurrence
+calman modify 5.2 all-future summary:x   # split series here: old keeps past, new edited series starts at #2
+calman delete 5.2 all-future    # truncate series here (#2 and everything after removed)
 ```
+TTY prompts on `modify`/`delete` of an occurrence ask whether to apply to all
+future occurrences first; non-TTY defaults to the single instance.
 
 ## Filters
 

@@ -63,6 +63,7 @@ fn run() -> anyhow::Result<()> {
         Some(Command::Delete) => cli::delete::run(&conf, &q),
         Some(Command::Modify) => cli::modify::run(&conf, &q),
         Some(Command::Count) => cli::count::run(&conf, &q),
+        Some(Command::Info) => cli::info::run(&conf, &q),
         Some(Command::Sync) => cli::sync::run(&conf, &q),
         Some(Command::Help) => {
             cli::print_filter_help();

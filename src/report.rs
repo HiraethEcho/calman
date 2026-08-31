@@ -49,9 +49,18 @@ enum SVal {
 
 impl Report {
     /// Resolve a report by name: config `[report.<name>]` wins, else builtin.
+    /// A config that omits `filter` inherits the builtin report's filter, so
+    /// partial overrides (columns/sort only) keep hiding completed/cancelled/
+    /// recurring parents as the defaults do.
     pub fn resolve(name: &str, conf: &Config) -> Report {
         match conf.reports.get(name) {
-            Some(cfg) => from_config(cfg),
+            Some(cfg) => {
+                let mut r = from_config(cfg);
+                if cfg.filter.is_none() {
+                    r.filter = builtin(name).filter;
+                }
+                r
+            }
             None => builtin(name),
         }
     }
@@ -806,6 +815,32 @@ mod tests {
         assert!(out.contains("ID"));
         assert!(out.contains("1"));
         assert!(out.contains("buy milk"));
+    }
+
+    #[test]
+    fn config_override_without_filter_inherits_builtin_filter() {
+        use crate::config::{ColumnCfg, ReportCfg};
+        let mut conf = Config::default();
+        conf.reports.insert(
+            "list".to_string(),
+            ReportCfg {
+                filter: None,
+                sort: Vec::new(),
+                columns: vec![ColumnCfg {
+                    field: "id".into(),
+                    label: Some("ID".into()),
+                    width: None,
+                    format: None,
+                    icon: false,
+                    icons: Default::default(),
+                    event_format: None,
+                    todo_format: None,
+                }],
+            },
+        );
+        let report = Report::resolve("list", &conf);
+        assert!(report.filter.contains("-status:recurring"));
+        assert_eq!(report.columns.len(), 1); // columns override still applies
     }
 
     #[test]

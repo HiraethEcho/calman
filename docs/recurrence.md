@@ -9,6 +9,7 @@ item's `rrule` (rendered as `RRULE:` in ICS).
 calman add "gym" due:tomorrow recur:every monday and wednesday for 8 weeks
 calman add "pay rent" due:eom recur:FREQ=MONTHLY;UNTIL=20261231
 calman add "standup" from:tomorrow recur:daily
+calman add "standup" due:eod recur:daily count:5   # count:/until: may be separate args
 ```
 
 Recurrence applies to **both todos and events**.
@@ -134,6 +135,20 @@ calman done 5.2                  # complete the 2nd upcoming occurrence of serie
 calman done 5 on:2026-09-02      # complete the occurrence starting that day
 calman delete 5.2                # delete one occurrence → EXDATE (skip that instance)
 calman modify 5.1 summary:x      # override 1st occurrence → RECURRENCE-ID sibling
+calman info 5.2                  # full details of that occurrence
+
+## Split / truncate from an occurrence (`all-future`)
+
+On a TTY, `modify`/`delete` of an occurrence asks whether it should apply to
+ALL future occurrences (answering no keeps the single-instance behaviour).
+Pass `all-future` to skip the prompt (scripts):
+
+calman modify 5.2 all-future summary:x   # split: old series keeps #1,
+                                          # a new edited series starts at #2 (new UID)
+calman delete 5.2 all-future             # truncate: series keeps #1 only
+
+Both rewrite the old master's RRULE with `COUNT = index-1` (absolutely
+numbered, EXDATE-aware) — or delete it when the occurrence is the first.
 calman modify 5 on:2026-09-02 summary:x
 ```
 

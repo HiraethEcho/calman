@@ -22,6 +22,7 @@ pub enum Command {
     Modify,
     Count,
     Sync,
+    Info,
     #[cfg(feature = "tui")]
     Tui,
     Help,
@@ -70,6 +71,9 @@ pub struct ParsedArgs {
     pub span: Option<String>,
     /// `allday` or `+allday` flag.
     pub allday: bool,
+    /// `all-future` bare keyword: apply an occurrence modify/delete to the
+    /// whole remaining series (split/truncate) without the interactive prompt.
+    pub apply_all_future: bool,
     /// `alert:15min` — VALARM lead time before start/due.
     pub alert: Option<String>,
 }
@@ -106,6 +110,9 @@ fn is_attr_token(t: &str) -> bool {
         || l.starts_with("location:")
         || l.starts_with("rel:")
         || l.starts_with("wait:")
+        || l.starts_with("count:")
+        || l.starts_with("until:")
+        || l == "all-future"
         || l.starts_with("status:")
         || l.starts_with("priority:")
         || l.starts_with("pri:")
@@ -237,8 +244,24 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
             } else {
                 q.location = Some(rest.to_string());
             }
-        } else if let Some(rest) = lower
-            .strip_prefix("repeat:")
+        } else if let Some(rest) = lower.strip_prefix("count:") {
+            // `recur:daily count:5` — series length lands on the recur rule.
+            match &mut q.repeat {
+                Some(r) => {
+                    r.push_str(" count:");
+                    r.push_str(rest);
+                }
+                None => bail!("`count:` requires `recur:`/`repeat:`"),
+            }
+        } else if let Some(rest) = lower.strip_prefix("until:") {
+            match &mut q.repeat {
+                Some(r) => {
+                    r.push_str(" until:");
+                    r.push_str(rest);
+                }
+                None => bail!("`until:` requires `recur:`/`repeat:`"),
+            }
+        } else if let Some(rest) = lower.strip_prefix("repeat:")
             .or_else(|| lower.strip_prefix("recur:"))
         {
             q.repeat = Some(rest.to_string());
@@ -255,6 +278,8 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
             }
         } else if lower == "allday" || lower == "+allday" {
             q.allday = true;
+        } else if lower == "all-future" {
+            q.apply_all_future = true;
         } else if tok.starts_with('+') && tok.len() > 1 {
             let name = &tok[1..];
             if name.eq_ignore_ascii_case("allday") {
@@ -352,6 +377,7 @@ fn command_word(tok: &str) -> Option<(Command, Option<String>)> {
         "done" | "complete" => (Command::Done, None),
         "delete" | "rm" => (Command::Delete, None),
         "modify" | "mod" => (Command::Modify, None),
+        "info" => (Command::Info, None),
         "count" => (Command::Count, None),
         "sync" => (Command::Sync, None),
         #[cfg(feature = "tui")]
@@ -559,11 +585,38 @@ mod tests {
     }
 
     #[test]
+    fn info_command_both_orders() {
+        let q = p(&["info", "3"]);
+        assert_eq!(q.cmd, Some(Command::Info));
+        assert_eq!(q.ids, vec!["3"]);
+        let q2 = p(&["3", "info"]);
+        assert_eq!(q2.cmd, Some(Command::Info));
+        assert_eq!(q2.ids, vec!["3"]);
+    }
+
+    #[test]
+    fn all_future_keyword() {
+        let q = p(&["modify", "5.2", "all-future", "due:tomorrow"]);
+        assert!(q.apply_all_future);
+        assert_eq!(q.ids, vec!["5.2"]);
+        assert_eq!(q.text, "");
+    }
+
+    #[test]
     fn recur_is_alias_for_repeat() {
         let q = p(&["add", "x", "recur:daily"]);
         assert_eq!(q.repeat.as_deref(), Some("daily"));
         let q2 = p(&["add", "x", "repeat:weekly"]);
         assert_eq!(q2.repeat.as_deref(), Some("weekly"));
+    }
+
+    #[test]
+    fn count_and_until_attach_to_recur() {
+        let q = p(&["add", "x", "recur:daily", "count:5"]);
+        assert_eq!(q.repeat.as_deref(), Some("daily count:5"));
+        let q2 = p(&["add", "x", "recur:daily", "until:eom"]);
+        assert_eq!(q2.repeat.as_deref(), Some("daily until:eom"));
+        assert!(parse(&["add", "x", "count:5"].map(String::from)).is_err());
     }
 }
 

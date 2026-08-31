@@ -4,6 +4,7 @@
 # 被 config.toml 的 include 引用。复制为 report.toml (或保持此名) 并按需修改。
 # 内容:
 #   [report.<name>]  报告定义 (同名覆盖内置 ls/list/next)
+#   filter 省略时继承内置 filter (隐藏 completed/cancelled/recurring 父)
 #   [icons]          nerdfont 图标全局覆盖
 #
 # 内置报告已存在: ls (短列) / list (长列) / next (默认)。这里展示同名覆盖写法,
@@ -77,9 +78,9 @@ completed = "✓"
 cancelled = "✕"
 
 [icons.event]                        # VEVENT: pending/confirmed/recurring=○, cancelled=✕ (无 completed)
-pending = "○"
+pending = ""
 in-progress = "●"
-recurring = "○"
+recurring = "⟳"
 completed = "✓"
 cancelled = "✕"
 

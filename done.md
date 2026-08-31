@@ -100,3 +100,20 @@
 4. 删 `report.default.toml`，并入 config.default.toml
 5. `[colorscheme.rules]` 内联表格式
 6. `modify from:<date>` → all-day，清除过期 dtend
+## more feature（info / all-future split-truncate）
+- `info` 命令：`calman info <id>` / `calman <id> info`；显示全字段（status、
+  日期、recur、wait、priority、tags、location、desc、alert、related、
+  created/updated/completed、uid）；支持 plain ID、`id.n` occurrence、UID
+- `modify` occurrence 交互询问（TTY）是否应用到所有未来；`all-future` 关键字
+  跳过询问：
+  - yes → split series：旧 master RRULE 改 `COUNT=abs_index-1`（保留该 occ 之前
+    所有实例），新 series = 旧内容+修改，从该 occ 起（新 UID，独立身份）
+  - 旧 COUNT 继承剩余数；`from:`/`due:` 显式给出则作为新 series 首日
+  - occ 是第 1 个 → 旧 master 整体删除
+- `delete` occurrence 交互询问是否删除该 occ 及所有未来；`all-future` 跳过：
+  - yes → truncate：旧 master `COUNT=abs_index-1`，清掉该 occ 起的
+    override；第 1 个 → 删整个 master
+- 绝对序号计算：幸存前驱数（expand 窗口 [DTSTART, occ)）+ EXDATE 前驱数 + 1
+  （COUNT 按算法序号，避免 EXDATE 位移）；`rrule::before` 是 inclusive → 窗口
+  终点用 `occ - 1s`
+- 非 TTY 默认单 occurrence（不询问）；`all-future` 供脚本强制
