@@ -76,9 +76,8 @@ RECURRENCE (recur: / repeat:)  → standard RFC 5545 RRULE
                      modify <id>.<n> … → RECURRENCE-ID override (same UID)
                      expanded rows carry plain IDs; `done 5` targets one occurrence
 
-DATE-ONLY DUE (config-driven overdue)
-  [date] due_date_overdue_today = false (default): overdue only after the day
-  [date] due_date_overdue_today = true : overdue from the due day itself
+DATE-ONLY DUE (fixed overdue policy)
+  a date-only `due` is owed only AFTER its day passes (today's due is not overdue)
   stored as DUE;VALUE=DATE in ICS (iOS Reminders compatible)
 
 FILTER GRAMMAR (shared by CLI args and report `filter`)
