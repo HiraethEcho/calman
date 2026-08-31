@@ -101,22 +101,8 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
             if !master.is_parent() {
                 bail!("task `{}` is not a recurring parent", tgt.uid);
             }
-            let mut ov = master.clone();
-            ov.uid = uuid::Uuid::new_v4().to_string();
-            ov.parent_uid = Some(master.uid);
-            ov.recurrence_id = Some(occ);
-            ov.rrule = None;
-            ov.exdates = Vec::new();
-            ov.status = TaskStatus::Pending; // an occurrence is a single active instance
-            if ov.is_event() {
-                let delta = occ - ov.dtstart.unwrap_or(occ);
-                ov.dtstart = Some(occ);
-                ov.dtend = ov.dtend.map(|e| e + delta);
-            } else {
-                ov.due = Some(occ);
-            }
-            ov.created_at = Utc::now();
-            ov.updated_at = Utc::now();
+            let mut ov =
+                crate::cli::override_for_occurrence(&master, occ, TaskStatus::Pending);
             apply(
                 &mut ov,
                 &Upd {
@@ -251,6 +237,8 @@ fn apply(t: &mut Task, u: &Upd) -> Result<()> {
     }
 
     if let Some(s) = u.start {
+        // Adding `start:` converts the item to a VEVENT.
+        t.event = true;
         // Date-only `start:` keeps the event all-day; date-time makes it timed.
         t.allday = u.start_allday;
         t.dtstart = Some(s);

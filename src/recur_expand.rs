@@ -11,6 +11,7 @@
 
 use chrono::{DateTime, TimeZone, Utc};
 use rrule::{RRuleSet, Tz};
+use std::cmp::Ordering;
 
 use crate::model::Task;
 
@@ -62,10 +63,31 @@ pub fn expand_task(task: &Task, after: DateTime<Utc>, before: DateTime<Utc>) -> 
     let before_tz: DateTime<Tz> = Tz::UTC.from_utc_datetime(&before.naive_utc());
     let result = rset.after(after_tz).before(before_tz).all(10_000);
 
-    result
+    let mut occs: Vec<_> = result
         .dates
         .into_iter()
         .map(|dt| DateTime::from_naive_utc_and_offset(dt.naive_utc(), Utc))
+        .collect();
+
+    // Order occurrences so the NEXT upcoming one is index 1, not the first in
+    // the expansion window (which starts a day in the past). Future instances
+    // ascend first, then past instances descend — so `1` is the next
+    // occurrence and `take(N)` in `list` shows upcoming items, while past
+    // ones (yesterday and older) stay addressable with larger numbers.
+    let now = Utc::now();
+    occs.sort_by(|a, b| {
+        let a_future = *a >= now;
+        let b_future = *b >= now;
+        match (a_future, b_future) {
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            (true, true) => a.cmp(b),
+            (false, false) => b.cmp(a),
+        }
+    });
+
+    occs
+        .into_iter()
         .enumerate()
         .map(|(i, occurrence_start)| Occurrence {
             master: task.clone(),

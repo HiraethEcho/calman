@@ -67,6 +67,11 @@ pub struct Task {
     pub dtend: Option<DateTime<Utc>>,
     pub rrule: Option<String>,
     pub location: Option<String>,
+    /// VEVENT/VTODO source component. `true` = VEVENT (dtstart required),
+    /// `false` = VTODO. Stored explicitly so a VTODO that carries a non-standard
+    /// DTSTART is still a todo; missing in legacy JSONL → inferred from dtstart.
+    #[serde(default)]
+    pub event: bool,
     /// All-day event: `.ics` renders `VALUE=DATE` (date-only, no timezone).
     #[serde(default)]
     pub allday: bool,
@@ -99,14 +104,18 @@ pub struct Task {
 }
 
 impl Task {
-    /// A task with a `dtstart` is an event; otherwise a todo.
+    /// Source component kind: explicit VEVENT flag (todo defaults false).
+    /// Legacy records without the field fall back to `dtstart`-inference.
     pub fn is_event(&self) -> bool {
-        self.dtstart.is_some()
+        self.event || (self.dtstart.is_some() && self.due.is_none())
     }
 
-    /// The task is a recurring series master (has `rrule`, is not an override).
+    /// The task is a recurring series master (has `rrule`, is not an override
+    /// or a virtual occurrence).
     pub fn is_parent(&self) -> bool {
-        self.rrule.is_some() && self.recurrence_id.is_none()
+        self.rrule.is_some()
+            && self.recurrence_id.is_none()
+            && self.parent_uid.is_none()
     }
 
     /// Create a brand-new task with generated UID and timestamps.
@@ -127,6 +136,7 @@ impl Task {
             dtend: None,
             rrule: None,
             location: None,
+            event: false,
             allday: false,
             alarm_before: None,
             related_to: None,
@@ -143,6 +153,21 @@ impl Task {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parent_detection_excludes_virtual_occurrences() {
+        let mut master = Task::new("work", "weekly");
+        master.rrule = Some("FREQ=WEEKLY".into());
+        assert!(master.is_parent());
+        // A stored override (RECURRENCE-ID) is not a parent...
+        let mut ov = master.clone();
+        ov.recurrence_id = Some(chrono::Utc::now());
+        assert!(!ov.is_parent());
+        // ...and neither is a virtual occurrence row (parent_uid marks it).
+        let mut occ = master.clone();
+        occ.parent_uid = Some(master.uid.clone());
+        assert!(!occ.is_parent());
+    }
 
     #[test]
     fn new_task_defaults() {

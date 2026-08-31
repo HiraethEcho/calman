@@ -116,7 +116,7 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
     lines.push_str("CALSCALE:GREGORIAN\r\n");
     lines.push_str("PRODID:-//calman//calman//EN\r\n");
 
-    let component = if task.is_event() { "VEVENT" } else { "VTODO" };
+    let component = if task.event { "VEVENT" } else { "VTODO" };
     lines.push_str(&format!("BEGIN:{component}\r\n"));
 
     let mut props = Vec::new();
@@ -170,7 +170,10 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
     if let Some(c) = task.completed_at {
         props.push(format!("COMPLETED:{}", dt(c)));
     }
-    if let Some(d) = task.dtstart {
+    // VTODO has no DTSTART/DTEND per RFC 5545 — only VEVENT writes them.
+    if task.event
+        && let Some(d) = task.dtstart
+    {
         if task.allday {
             props.push(format!(
                 "DTSTART;VALUE=DATE:{}",
@@ -180,7 +183,9 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
             props.push(format!("DTSTART;TZID={}:{}", tz.name(), dt_local(d, tz)));
         }
     }
-    if let Some(d) = task.dtend {
+    if task.event
+        && let Some(d) = task.dtend
+    {
         if task.allday {
             props.push(format!(
                 "DTEND;VALUE=DATE:{}",
@@ -249,6 +254,7 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
 
 /// Parse a VCALENDAR document into a `Task`.
 pub fn parse_ics(content: &str) -> Result<Task> {
+    let mut event_kind = false;
     let mut uid = String::new();
     let mut summary = String::new();
     let mut status = TaskStatus::Pending;
@@ -268,6 +274,7 @@ pub fn parse_ics(content: &str) -> Result<Task> {
     let mut allday = false;
     let mut alarm_before = None;
     let mut in_alarm = false;
+    let mut in_vtimezone = false;
     let mut exdates = Vec::new();
     let mut recurrence_id = None;
     let mut parent_uid = None;
@@ -280,12 +287,32 @@ pub fn parse_ics(content: &str) -> Result<Task> {
             .unwrap_or(("", ""));
         let key = name.split(';').next().unwrap_or("").to_uppercase();
         let tzid = param_tzid(name);
+        if key == "BEGIN" && value == "VEVENT" {
+            event_kind = true;
+        }
+        if key == "BEGIN" && value == "VTODO" {
+            event_kind = false;
+        }
         if key == "BEGIN" && value == "VALARM" {
             in_alarm = true;
             continue;
         }
         if key == "END" && value == "VALARM" {
             in_alarm = false;
+            continue;
+        }
+        // VTIMEZONE blocks carry their own DTSTART/RRULE definitions that
+        // must NOT overwrite the component's real properties (this is how
+        // CalDAV servers ship recurring events).
+        if key == "BEGIN" && value == "VTIMEZONE" {
+            in_vtimezone = true;
+            continue;
+        }
+        if key == "END" && value == "VTIMEZONE" {
+            in_vtimezone = false;
+            continue;
+        }
+        if in_vtimezone {
             continue;
         }
         match key.as_str() {
@@ -389,6 +416,7 @@ pub fn parse_ics(content: &str) -> Result<Task> {
         rrule,
         location,
         related_to,
+        event: event_kind,
         allday,
         alarm_before,
         created_at: created_at.unwrap_or_else(Utc::now),
@@ -619,6 +647,7 @@ mod tests {
     #[test]
     fn allday_and_alarm_roundtrip() {
         let mut t = make_task();
+        t.event = true;
         t.allday = true;
         t.dtstart = Some(crate::date::local_midnight(
             chrono::NaiveDate::from_ymd_opt(2026, 8, 12).unwrap(),
@@ -678,6 +707,22 @@ mod tests {
     }
 
     #[test]
+    fn vtimezone_props_do_not_pollute_component() {
+        // VTIMEZONE carries its own DTSTART/RRULE definitions; they must not
+        // overwrite the VEVENT's real dtstart nor mark it recurring.
+        let content = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTIMEZONE\r\nTZID:Asia/Shanghai\r\nBEGIN:STANDARD\r\nDTSTART:19890917T020000\r\nRRULE:FREQ=YEARLY;UNTIL=20490917T020000Z;BYMONTH=9\r\nTZOFFSETFROM:+0900\r\nTZOFFSETTO:+0800\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\nBEGIN:VEVENT\r\nUID:plain-1\r\nSUMMARY:one-off\r\nDTSTART;TZID=Asia/Shanghai:20260901T100000\r\nDTSTAMP:20260824T134610Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let t = parse_ics(content).unwrap();
+        // Not recurring: the RRULE above came from the timezone definition.
+        assert_eq!(t.status, TaskStatus::Pending);
+        assert!(t.rrule.is_none());
+        // dtstart is the VEVENT's, not the TZ block's.
+        assert_eq!(
+            t.dtstart.unwrap().format("%Y%m%dT%H%M%SZ").to_string(),
+            "20260901T020000Z"
+        );
+    }
+
+    #[test]
     fn parse_override_sets_recurrence_id_and_parent_uid() {
         let content = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:series-1\r\nSUMMARY:rescheduled\r\nDTSTART;TZID=Asia/Shanghai:20260908T100000\r\nRECURRENCE-ID;TZID=Asia/Shanghai:20260901T090000\r\nDTSTAMP:20260824T134610Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
         let t = parse_ics(content).unwrap();
@@ -690,8 +735,38 @@ mod tests {
     }
 
     #[test]
+    fn vtodo_with_dtstart_stays_todo() {
+        // Non-standard VTODO carrying DTSTART must remain a todo (explicit
+        // component flag wins over dtstart-inference).
+        let content = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:weird-1\r\nSUMMARY:task-with-start\r\nDTSTART;TZID=Asia/Shanghai:20260901T090000\r\nDUE;TZID=Asia/Shanghai:20260902T090000\r\nDTSTAMP:20260824T134610Z\r\nEND:VTODO\r\nEND:VCALENDAR\r\n";
+        let t = parse_ics(content).unwrap();
+        assert!(!t.event);
+        assert!(!t.is_event());
+        // ...and renders back as VTODO without DTSTART.
+        let out = render_ics(&t, chrono_tz::Tz::Asia__Shanghai).unwrap();
+        assert!(out.contains("BEGIN:VTODO"));
+        assert!(!out.contains("DTSTART"));
+        assert!(out.contains("DUE;TZID=Asia/Shanghai"));
+    }
+
+    #[test]
+    fn legacy_jsonl_without_event_flag_infers() {
+        // Old JSONL records have no `event` field: deserialise with default
+        // false, then infer event from dtstart-without-due.
+        let json = r#"{"uid":"u1","source":"work","summary":"old event","description":null,"status":"pending","priority":null,"tags":[],"due":null,"percent_complete":null,"completed_at":null,"dtstart":"2026-09-01T02:00:00Z","dtend":null,"rrule":null,"location":null,"allday":false,"alarm_before":null,"related_to":null,"wait":null,"exdates":[],"recurrence_id":null,"parent_uid":null,"created_at":"2026-08-01T00:00:00Z","updated_at":"2026-08-01T00:00:00Z"}"#;
+        let t: Task = serde_json::from_str(json).unwrap();
+        assert!(!t.event);          // legacy: field absent → false
+        assert!(t.is_event());      // but dtstart-without-due infers event
+        // Old VTODO with due stays todo even with dtstart (due present).
+        let json2 = json.replace("\"due\":null", "\"due\":\"2026-09-02T02:00:00Z\"");
+        let t2: Task = serde_json::from_str(&json2).unwrap();
+        assert!(!t2.is_event());
+    }
+
+    #[test]
     fn render_parent_emits_rrule_and_exdate() {
         let mut t = Task::new("work", "standup");
+        t.event = true;
         t.status = TaskStatus::Recurring;
         t.dtstart = Some(chrono::Utc::now());
         t.rrule = Some("FREQ=WEEKLY;BYDAY=TU".to_string());

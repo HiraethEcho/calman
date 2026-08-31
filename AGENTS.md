@@ -1,5 +1,9 @@
 # AGENTS.md — calman Developer Guide for AI Assistants
 
+## 0. Commit Policy
+
+- **NEVER commit before the user approves.** Show changes, wait for explicit approval.
+
 ## 1. Project Overview
 - **Name**: calman — a minimalist, keyboard‑driven task manager with CLI and TUI.
 - **Language**: Rust (Edition 2024)

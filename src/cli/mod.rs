@@ -11,7 +11,7 @@ pub mod sync;
 pub mod tui;
 
 use crate::config::{Config, ContextKind, Source, SourceType};
-use crate::model::Task;
+use crate::model::{Task, TaskStatus};
 use crate::source;
 #[cfg(feature = "storage-ics")]
 use crate::storage::ics::IcsStorage;
@@ -84,6 +84,7 @@ FILTER GRAMMAR (shared by CLI args and report `filter`)
   type:todo | type:event | type:all        (+TODO / +EVENT aliases)
   source:work  -source:work                include / exclude a source
   due:<day> exact | due.before:<   strict < | due.by:<   <= | due.after:>=
+  date:<day> (unified: todo→due, event→dtstart) + date.before:/date.by:/date.after:
   start:<day> exact | start.before:/start.by:/start.after:  (events' dtstart only)
   status:pending|in-progress|completed|cancelled|recurring|active
   +OVERDUE +PENDING +COMPLETED +CANCELLED +IN-PROCESS +TAGGED +UNTAGGED +SCHEDULED +PARENT
@@ -268,6 +269,9 @@ fn expand_occurrences(rows: &mut Vec<Row>, conf: &Config) {
             let mut t = override_task.clone().unwrap_or_else(|| occ.master.clone());
             // A virtual occurrence from the template is a single active instance;
             // a stored override keeps its own status (e.g. completed).
+            // Mark it with the master's uid so `is_parent()`/`+PARENT` never
+            // match a virtual occurrence row.
+            t.parent_uid = Some(r.task.uid.clone());
             if override_task.is_none() {
                 t.status = TaskStatus::Pending;
             }
@@ -278,6 +282,9 @@ fn expand_occurrences(rows: &mut Vec<Row>, conf: &Config) {
             } else {
                 t.due = Some(occ.occurrence_start);
             }
+            // An occurrence's effective creation time is its own date
+            // (per-period), so the ID ordering below interleaves it correctly.
+            t.created_at = occ.occurrence_start;
             extra.push(Row {
                 id: r.id,
                 source: r.source.clone(),
@@ -287,10 +294,74 @@ fn expand_occurrences(rows: &mut Vec<Row>, conf: &Config) {
         }
     }
     rows.extend(extra);
+
+    // Two-segment ID ordering:
+    //  1) active todos + future/today events — by created_at ASC
+    //  2) completed/cancelled todos + past events — by created_at DESC
+    // Occurrence rows carry their own date as created_at (set above), so a
+    // recurring series' future instances sit in the first segment.
+    // Two-segment ID ordering:
+    //  1) not-done todos + events starting today-or-later — created ASC
+    //  2) done todos + events starting before today — created DESC
+    // Occurrence rows carry their own date as created_at (set above), so a
+    // recurring series' future instances sit in the first segment.
+    let today = Local::now().date_naive();
+    let first = |r: &Row| -> bool {
+        if r.task.is_event() {
+            // Events are split by their start date (> yesterday ⇒ segment 1).
+            r.task
+                .dtstart
+                .is_some_and(|d| d.with_timezone(&Local).date_naive() >= today)
+        } else {
+            // Todos are split by completion only; due date is irrelevant.
+            !r.task.status.is_done()
+        }
+    };
+    let cmp_asc = |a: &Row, b: &Row| {
+        a.task
+            .created_at
+            .cmp(&b.task.created_at)
+            .then_with(|| a.task.uid.cmp(&b.task.uid))
+    };
+    rows.sort_by(|a, b| match (first(a), first(b)) {
+        (true, true) => cmp_asc(a, b),
+        (false, false) => cmp_asc(b, a),
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+    });
+
     // Taskwarrior-style plain sequential IDs over the whole list.
     for (i, r) in rows.iter_mut().enumerate() {
         r.id = i + 1;
     }
+}
+
+/// Build a per-occurrence override sibling: same UID family, `recurrence_id`
+/// = the occurrence's original DTSTART, acting as a completed or edited
+/// replacement instance. Used by `done` (Completed) and `modify` (Pending).
+pub fn override_for_occurrence(
+    master: &Task,
+    occ: DateTime<Utc>,
+    status: TaskStatus,
+) -> Task {
+    let mut ov = master.clone();
+    ov.uid = uuid::Uuid::new_v4().to_string();
+    ov.parent_uid = Some(master.uid.clone());
+    ov.recurrence_id = Some(occ);
+    ov.rrule = None;
+    ov.exdates = Vec::new();
+    ov.status = status;
+    if ov.is_event() {
+        let delta = occ - ov.dtstart.unwrap_or(occ);
+        ov.dtstart = Some(occ);
+        ov.dtend = ov.dtend.map(|e| e + delta);
+    } else {
+        ov.due = Some(occ);
+    }
+    let now = chrono::Utc::now();
+    ov.created_at = now;
+    ov.updated_at = now;
+    ov
 }
 
 /// A resolved target that may address a single occurrence of a recurring series.
@@ -509,6 +580,54 @@ mod tests {
         assert_eq!(rows[0].task.summary, "older");
         assert_eq!(rows[1].id, 2);
         assert_eq!(rows[1].task.summary, "newer");
+    }
+
+    #[cfg(feature = "recur-expand")]
+    #[test]
+    fn two_segment_id_order() {
+        use crate::model::TaskStatus;
+        use chrono::{Duration, Utc};
+        let dir = tempdir().unwrap();
+        let mut st = crate::storage::jsonl::JsonlStorage::open(dir.path()).unwrap();
+        let now = Utc::now();
+        // created order: old-event(-12d) < done(-10d) < past(-9d) < future(-8d) < active(-1d)
+        let mut old_ev = Task::new("work", "old-event");
+        old_ev.dtstart = Some(now - Duration::days(400)); // last year
+        old_ev.created_at = now - Duration::days(12);
+        let mut done = Task::new("work", "done");
+        done.status = TaskStatus::Completed;
+        done.created_at = now - Duration::days(10);
+        let mut past = Task::new("work", "overdue");
+        past.due = Some(now - Duration::days(3));
+        past.created_at = now - Duration::days(9);
+        let mut future = Task::new("work", "future");
+        future.dtstart = Some(now + Duration::days(2));
+        future.created_at = now - Duration::days(8);
+        let active = Task::new("work", "active");
+        for t in [old_ev, done, past, future, active] {
+            st.add(t).unwrap();
+        }
+        drop(st);
+
+        let rows = load_merged_expanded(&Config::default(), &[source(dir.path(), "work")]).unwrap();
+        let ids: Vec<(usize, &str)> = rows
+            .iter()
+            .map(|r| (r.id, r.task.summary.as_str()))
+            .collect();
+        // segment 1: not-done todos + today-or-future events, created ASC
+        // (overdue has a past due but is NOT done → stays in segment 1)
+        // segment 2: done todos + past events, created DESC
+        // (old-event from last year is the earliest-created → ends the index)
+        assert_eq!(
+            ids,
+            vec![
+                (1, "overdue"),
+                (2, "future"),
+                (3, "active"),
+                (4, "done"),
+                (5, "old-event"),
+            ]
+        );
     }
 
     #[test]

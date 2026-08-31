@@ -60,6 +60,8 @@ pub struct Filter {
     pub priority: Option<u8>,
     pub tags: Vec<String>,
     pub due: Option<(DueOp, DateTime<Utc>)>,
+    /// `date:` filter — unified date: todo→due, event→dtstart.
+    pub date: Option<(DueOp, DateTime<Utc>)>,
     pub start: Option<(DueOp, DateTime<Utc>)>,
     pub flags: Vec<Flag>,
 }
@@ -145,11 +147,22 @@ impl Filter {
         {
             return false;
         }
-        // `start:` filters match VEVENT `dtstart` only (todos have none).
-        if let Some((op, dt)) = self.start
-            && !due_matches(op, dt, t.dtstart)
+        // `date:` matches the unified date (due for todos, dtstart for events).
+        if let Some((op, dt)) = self.date
+            && !due_matches(op, dt, task_date(t))
         {
             return false;
+        }
+        // `start:` filters match VEVENT `dtstart` only; a todo (no dtstart)
+        // never matches, so it must also not slip through the negation.
+        if let Some((op, dt)) = self.start {
+            let ok = match t.dtstart {
+                Some(start) => due_matches(op, dt, Some(start)),
+                None => false,
+            };
+            if !ok {
+                return false;
+            }
         }
         true
     }
@@ -344,6 +357,18 @@ fn parse_atom(tok: &str) -> Result<Expr> {
     if let Some(rest) = lower.strip_prefix("-due:") {
         return Ok(Expr::Not(Box::new(due_atom(DueOp::On, rest)?)));
     }
+    if let Some(rest) = lower.strip_prefix("-date.before:") {
+        return Ok(Expr::Not(Box::new(date_atom(DueOp::Before, rest)?)));
+    }
+    if let Some(rest) = lower.strip_prefix("-date.by:") {
+        return Ok(Expr::Not(Box::new(date_atom(DueOp::By, rest)?)));
+    }
+    if let Some(rest) = lower.strip_prefix("-date.after:") {
+        return Ok(Expr::Not(Box::new(date_atom(DueOp::After, rest)?)));
+    }
+    if let Some(rest) = lower.strip_prefix("-date:") {
+        return Ok(Expr::Not(Box::new(date_atom(DueOp::On, rest)?)));
+    }
     if let Some(rest) = lower.strip_prefix("-start.before:") {
         return Ok(Expr::Not(Box::new(start_atom(DueOp::Before, rest)?)));
     }
@@ -408,6 +433,19 @@ fn parse_positive(tok: &str) -> Result<Expr> {
     }
     if let Some(rest) = lower.strip_prefix("due:") {
         return due_atom(DueOp::On, rest);
+    }
+
+    if let Some(rest) = lower.strip_prefix("date.before:") {
+        return date_atom(DueOp::Before, rest);
+    }
+    if let Some(rest) = lower.strip_prefix("date.by:") {
+        return date_atom(DueOp::By, rest);
+    }
+    if let Some(rest) = lower.strip_prefix("date.after:") {
+        return date_atom(DueOp::After, rest);
+    }
+    if let Some(rest) = lower.strip_prefix("date:") {
+        return date_atom(DueOp::On, rest);
     }
 
     if let Some(rest) = lower.strip_prefix("start.before:") {
@@ -501,6 +539,15 @@ fn start_atom(op: DueOp, rest: &str) -> Result<Expr> {
     let dt = parse_datetime(rest)?;
     Ok(Expr::Atom(Filter {
         start: Some((op, dt)),
+        ..Filter::default()
+    }))
+}
+
+/// `date:` filter — todo→due, event→dtstart (the unified date).
+fn date_atom(op: DueOp, rest: &str) -> Result<Expr> {
+    let dt = parse_datetime(rest)?;
+    Ok(Expr::Atom(Filter {
+        date: Some((op, dt)),
         ..Filter::default()
     }))
 }
@@ -599,6 +646,24 @@ mod tests {
         assert!(parse_expr_str("due.before:now").unwrap().matches(&t));
         assert!(parse_expr_str("due.by:now").unwrap().matches(&t));
         assert!(!parse_expr_str("due.after:now").unwrap().matches(&t));
+    }
+
+    #[test]
+    fn date_filter_uses_due_for_todo_dtstart_for_event() {
+        // todo: date = due (past) → after:now false, before:now true
+        let t = todo(2);
+        assert!(!parse_expr_str("date.after:now").unwrap().matches(&t));
+        assert!(parse_expr_str("date.before:now").unwrap().matches(&t));
+        assert!(parse_expr_str("date.by:now").unwrap().matches(&t));
+        // event: date = dtstart (future) → after:now true
+        let ev = future_event();
+        assert!(parse_expr_str("date.after:now").unwrap().matches(&ev));
+        assert!(!parse_expr_str("date.before:now").unwrap().matches(&ev));
+        // todo without any date never matches date filters
+        let bare = Task::new("work", "bare");
+        assert!(!parse_expr_str("date:today").unwrap().matches(&bare));
+        // negation
+        assert!(parse_expr_str("-date.after:now").unwrap().matches(&t));
     }
 
     #[test]

@@ -274,6 +274,16 @@ fn named_date(s: &str) -> Option<DateTime<Utc>> {
             today + Duration::days(1),
             (eh, em, es),
         ),
+        "sopd" => (
+            today - Duration::days(1),
+            today - Duration::days(1),
+            (sh, sm, ss),
+        ),
+        "eopd" => (
+            today - Duration::days(1),
+            today - Duration::days(1),
+            (eh, em, es),
+        ),
         "sow" | "soww" => (week_start, week_start, (sh, sm, ss)),
         "eow" => (
             week_start + Duration::days(6),
@@ -545,6 +555,16 @@ mod tests {
         let tm = parse_datetime("tomorrow").unwrap().with_timezone(&Local);
         assert_eq!(et.date_naive(), tm.date_naive());
         assert_eq!(et.hour(), 23);
+
+        // previous-day boundaries: sopd = yesterday day_start, eopd = yesterday day_end
+        let sopd = parse_datetime("sopd").unwrap().with_timezone(&Local);
+        let eopd = parse_datetime("eopd").unwrap().with_timezone(&Local);
+        let yest = parse_datetime("yesterday").unwrap().with_timezone(&Local);
+        assert_eq!(sopd.date_naive(), yest.date_naive());
+        assert_eq!(eopd.date_naive(), yest.date_naive());
+        assert_eq!(sopd.hour(), parse_datetime("sod").unwrap().with_timezone(&Local).hour());
+        assert_eq!(eopd.hour(), parse_datetime("eod").unwrap().with_timezone(&Local).hour());
+        assert!(eopd > sopd);
     }
 
     fn last_day(y: i32, m: u32) -> u32 {

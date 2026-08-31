@@ -65,6 +65,7 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         if q.due.is_some() {
             bail!("use either `start:` (event) or `due:` (todo), not both");
         }
+        task.event = true;
         let start = parse_date_value(start_str)?;
         task.allday = q.allday || matches!(start, DateValue::Date(_));
         task.dtstart = Some(match start {

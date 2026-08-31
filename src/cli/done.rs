@@ -16,14 +16,21 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         let src = resolve_source(conf, &tgt.source)?;
         let mut st = open_storage(conf, &src)?;
         if let Some(occ) = tgt.occ_date {
-            // Completing one occurrence excludes it from the series (EXDATE).
-            st.update(&tgt.uid, |t| {
-                if !t.exdates.contains(&occ) {
-                    t.exdates.push(occ);
-                }
-                Ok(())
-            })?
-            .ok_or_else(|| anyhow::anyhow!("task `{}` disappeared", tgt.uid))?;
+            // Completing one occurrence records a Completed override sibling
+            // (visible as a done item), not a silent EXDATE skip.
+            let master = st
+                .list()
+                .iter()
+                .find(|t| t.uid == tgt.uid)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("task `{}` disappeared", tgt.uid))?;
+            if !master.is_parent() {
+                bail!("task `{}` is not a recurring parent", tgt.uid);
+            }
+            let mut ov =
+                crate::cli::override_for_occurrence(&master, occ, TaskStatus::Completed);
+            ov.completed_at = Some(chrono::Utc::now());
+            st.add(ov)?;
         } else {
             st.update(&tgt.uid, |t| {
                 if t.is_parent() {
