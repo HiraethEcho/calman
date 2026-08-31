@@ -43,6 +43,7 @@ pub enum Flag {
     Completed,
     Cancelled,
     InProgress,
+    Started,
     Tagged,
     Untagged,
     Scheduled,
@@ -175,6 +176,7 @@ fn flag_matches(f: Flag, t: &Task) -> bool {
         Flag::Completed => t.status == TaskStatus::Completed,
         Flag::Cancelled => t.status == TaskStatus::Cancelled,
         Flag::InProgress => t.status == TaskStatus::InProgress,
+        Flag::Started => t.started_at.is_some(),
         Flag::Tagged => !t.tags.is_empty(),
         Flag::Untagged => t.tags.is_empty(),
         Flag::Scheduled => t.is_event(),
@@ -515,9 +517,10 @@ fn virtual_flag(lname: &str) -> Option<Flag> {
         "active" | "pending" => Some(Flag::Pending),
         "completed" | "done" => Some(Flag::Completed),
         "cancelled" | "canceled" => Some(Flag::Cancelled),
-        "in-progress" | "inprogress" | "in-process" | "inprocess" | "started" => {
+        "in-progress" | "inprogress" | "in-process" | "inprocess" => {
             Some(Flag::InProgress)
         }
+        "started" => Some(Flag::Started),
         "tagged" => Some(Flag::Tagged),
         "untagged" => Some(Flag::Untagged),
         "scheduled" => Some(Flag::Scheduled),
@@ -591,6 +594,23 @@ mod tests {
     fn empty_matches_all() {
         let e = parse_expr(&[]).unwrap();
         assert!(e.matches(&Task::new("work", "any")));
+    }
+
+    #[test]
+    fn started_flag_matches_started_at() {
+        use chrono::Utc;
+        let mut t = todo(0);
+        let e = parse_expr_str("+STARTED").unwrap();
+        assert!(!e.matches(&t));
+        t.started_at = Some(Utc::now());
+        assert!(e.matches(&t));
+
+        // `status:started` stays an in-progress alias (status-based).
+        let s = parse_expr_str("status:started").unwrap();
+        let mut u = todo(0);
+        u.status = TaskStatus::InProgress;
+        assert!(s.matches(&u));
+        assert!(!s.matches(&todo(0)));
     }
 
     #[test]

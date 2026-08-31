@@ -139,6 +139,9 @@ fn print_row(r: &Row) {
     if let Some(w) = t.wait {
         field("wait", format!("{w}s before date"));
     }
+    if let Some(s) = t.started_at {
+        field("started", fmt_dt(s));
+    }
     if let Some(p) = t.priority {
         field("priority", p.to_string());
     }

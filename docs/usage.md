@@ -136,6 +136,28 @@ Notes:
 
 ---
 
+## `start` / `stop` — time a todo, turn it into an event
+
+```sh
+calman start <ID> [ID...]
+calman stop <ID> [ID...]
+```
+
+`start` records the start time (`started_at`) and sets status in-progress;
+`+STARTED` matches started todos. `stop` copies the todo into a **timed event**
+spanning [started, now] (same source, fields/tags/priority copied) and asks
+whether to mark the todo done — non-interactive input leaves it unfinished
+(back to pending, `started_at` cleared; `start` again for a fresh span).
+
+```sh
+calman start 5          # → in-progress, +STARTED
+calman stop 5           # → new event 14:00–14:37; asks "mark todo as done?"
+```
+
+Events, completed items and recurring series masters cannot be started.
+
+---
+
 ## `info` — show full details
 
 ```sh

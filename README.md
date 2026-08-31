@@ -20,6 +20,7 @@ calman add "standup" from:tomorrow recur:daily        # event, daily
 calman                                          # → `next` report
 calman list source:work
 calman done 1
+calman start 1 && calman stop 1   # time it, then turn it into an event
 calman count +OVERDUE
 calman help                                     # full cheat-sheet
 ```

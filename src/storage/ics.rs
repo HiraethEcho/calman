@@ -236,6 +236,9 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
     if let Some(w) = task.wait {
         props.push(format!("X-CALMAN-WAIT-OFFSET:{w}"));
     }
+    if let Some(s) = task.started_at {
+        props.push(ics_date_prop("X-CALMAN-STARTED", s, false, tz));
+    }
     if let Some(d) = &task.description {
         props.push(format!("DESCRIPTION:{}", escape_text(d)));
     }
@@ -281,6 +284,7 @@ pub fn parse_ics(content: &str) -> Result<Task> {
     let mut recurrence_id = None;
     let mut parent_uid = None;
     let mut wait = None;
+    let mut started_at = None;
 
     for raw in unfold(content) {
         let (name, value) = raw
@@ -360,6 +364,13 @@ pub fn parse_ics(content: &str) -> Result<Task> {
             }
             "RRULE" => rrule = Some(value.to_string()),
             "X-CALMAN-WAIT-OFFSET" => wait = value.trim().parse::<i64>().ok(),
+            "X-CALMAN-STARTED" => {
+                let tz = param_tzid(name);
+                started_at = match &tz {
+                    Some(tz) => parse_tz(value, tz),
+                    None => parse_dt(value),
+                };
+            }
             "EXDATE" => {
                 // RFC 5545 allows a comma-separated list of excluded datetimes.
                 let tz = param_tzid(name);
@@ -432,6 +443,7 @@ pub fn parse_ics(content: &str) -> Result<Task> {
         recurrence_id,
         parent_uid,
         wait,
+        started_at,
     })
 }
 
@@ -905,4 +917,19 @@ mod tests {
         assert_eq!(mv.uid, "a-master");
         assert_eq!(ov.parent_uid.as_deref(), Some("a-master"));
     }
+
+    #[test]
+    fn started_at_roundtrips_via_xcalman_started() {
+        let mut t = make_task();
+        let now = chrono::DateTime::from_timestamp(chrono::Utc::now().timestamp(), 0).unwrap(); // ICS stores seconds
+        t.started_at = Some(now);
+        let out = render_ics(&t, Tz::UTC).unwrap();
+        assert!(out.contains("X-CALMAN-STARTED"));
+        let back = parse_ics(&out).unwrap();
+        assert_eq!(back.started_at, t.started_at);
+        // Unstarted tasks carry no property.
+        let plain = parse_ics(&render_ics(&make_task(), Tz::UTC).unwrap()).unwrap();
+        assert!(plain.started_at.is_none());
+    }
 }
+

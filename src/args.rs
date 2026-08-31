@@ -23,6 +23,8 @@ pub enum Command {
     Count,
     Sync,
     Info,
+    Start,
+    Stop,
     #[cfg(feature = "tui")]
     Tui,
     Help,
@@ -375,6 +377,8 @@ fn command_word(tok: &str) -> Option<(Command, Option<String>)> {
         "ls" => (Command::List, Some("ls".to_string())),
         "next" => (Command::List, Some("next".to_string())),
         "done" | "complete" => (Command::Done, None),
+        "start" => (Command::Start, None),
+        "stop" => (Command::Stop, None),
         "delete" | "rm" => (Command::Delete, None),
         "modify" | "mod" => (Command::Modify, None),
         "info" => (Command::Info, None),
@@ -592,6 +596,16 @@ mod tests {
         let q2 = p(&["3", "info"]);
         assert_eq!(q2.cmd, Some(Command::Info));
         assert_eq!(q2.ids, vec!["3"]);
+    }
+
+    #[test]
+    fn start_stop_commands() {
+        let q = p(&["start", "1", "3"]);
+        assert_eq!(q.cmd, Some(Command::Start));
+        assert_eq!(q.ids, vec!["1", "3"]);
+        let q2 = p(&["stop", "1"]);
+        assert_eq!(q2.cmd, Some(Command::Stop));
+        assert_eq!(q2.ids, vec!["1"]);
     }
 
     #[test]

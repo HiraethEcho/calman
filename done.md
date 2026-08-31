@@ -117,3 +117,16 @@
   （COUNT 按算法序号，避免 EXDATE 位移）；`rrule::before` 是 inclusive → 窗口
   终点用 `occ - 1s`
 - 非 TTY 默认单 occurrence（不询问）；`all-future` 供脚本强制
+
+## Todo → Event（start / stop）
+- `calman start <id>`：记录 `Task.started_at` + status → InProgress；event /
+  completed / recurring master 不可 start（报错）
+- `calman stop <id>`：复制 todo 为 timed event（同 source，dtstart=started_at、
+  dtend=now，复制 summary/desc/tags/pri/location/alert，无 related_to 回链），
+  询问是否标记 todo done（TTY；非 TTY 默认否）——是 → Completed +
+  completed_at；否 → 回 Pending；started_at 均清空
+- `Task.started_at`：jsonl serde；ICS `X-CALMAN-STARTED` 私有属性 roundtrip
+  （秒精度）
+- `+STARTED` 虚拟标签 = `started_at.is_some()`；`status:started` 仍是
+  in-progress 别名（status 判定）
+- info 显示 started 字段；`calman st stop` 场景：重复 stop 报错未 start

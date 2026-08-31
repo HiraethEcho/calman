@@ -98,6 +98,12 @@ pub struct Task {
     #[serde(default)]
     pub parent_uid: Option<String>,
 
+    /// When the todo was started with `calman start <id>`; `stop` turns it
+    /// into an event spanning [started_at, now]. Persisted in ICS as the
+    /// private `X-CALMAN-STARTED` property (no VTODO standard exists).
+    #[serde(default)]
+    pub started_at: Option<DateTime<Utc>>,
+
     // Timestamps.
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -144,6 +150,7 @@ impl Task {
             exdates: Vec::new(),
             recurrence_id: None,
             parent_uid: None,
+            started_at: None,
             created_at: now,
             updated_at: now,
         }

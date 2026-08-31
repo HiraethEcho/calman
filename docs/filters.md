@@ -37,7 +37,8 @@ offsets like `+3d`.
 | `+PENDING` / `+ACTIVE` | Active (not completed/cancelled). **Events count as pending.** |
 | `+COMPLETED` / `+DONE` | Completed. |
 | `+CANCELLED` / `+CANCELED` | Cancelled. |
-| `+IN-PROGRESS` / `+STARTED` | In-progress. |
+| `+IN-PROGRESS` | In-progress (status). |
+| `+STARTED` | `calman start <id>` recorded a start time (`started_at`). |
 | `+TAGGED` | Has at least one tag. |
 | `+UNTAGGED` | Has no tags. |
 | `+SCHEDULED` | Is an event (has `dtstart`). |

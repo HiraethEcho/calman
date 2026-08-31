@@ -8,6 +8,8 @@ pub mod info;
 pub mod list;
 pub mod modify;
 pub mod series;
+pub mod start;
+pub mod stop;
 pub mod sync;
 #[cfg(feature = "tui")]
 pub mod tui;
@@ -46,9 +48,16 @@ COMMANDS
   calman delete <id>             hard delete
   calman modify <id> [opts]      change fields
   calman info <id> | <id> info   show full details
+  calman start <id>              record start time (→ in-progress)
+  calman stop <id>               turn started todo into an event (todo done)
   calman count [filter]          print number of matches
   calman sync [source]           run external sync command
   calman help | filters          show this cheat-sheet
+
+START / STOP (todo → event)
+  calman start <id>        set started_at + status in-progress
+  calman stop <id>         copy todo to an event [started_at, now], todo done
+                           new event links back via rel:<todo-uid>
 
 COMMON OPTIONS (add / modify)
   due:<date>        todo deadline (date-only → all-day todo)
@@ -98,8 +107,7 @@ FILTER GRAMMAR (shared by CLI args and report `filter`)
   date:<day> (unified: todo→due, event→dtstart) + date.before:/date.by:/date.after:
   from:<day> exact | from.before:/from.by:/from.after:  (events' dtstart only)
   status:pending|in-progress|completed|cancelled|recurring|active
-  +OVERDUE +PENDING +COMPLETED +CANCELLED +IN-PROCESS +TAGGED +UNTAGGED +SCHEDULED +PARENT
-  +tag / -tag
+  +OVERDUE +PENDING +COMPLETED +CANCELLED +IN-PROCESS +STARTED +TAGGED +UNTAGGED +SCHEDULED +PARENT  +tag / -tag
   Composition: adjacent atoms = and; `and` binds tighter than `or`:
     A B or C D     = (A and B) or (C and D)
     (A or B) C     = (A or B) and C

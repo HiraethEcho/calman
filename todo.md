@@ -2,16 +2,7 @@
 
 未完成需求。已完成项见 done.md。
 （+DELETED 已明确不做——delete 即硬删文件。）
-（info 命令、occurrence all-future split/truncate 已完成，见 done.md。）
-
-##  Todo → Event（"start a todo, when stop it create an event"）
-**需求**：开始 todo → 停止时生成 event（dtstart=开始, dtend=停止）。
-
-**待定方案**：
-- `calman start <id>` → 记录 `started_at`（新字段）
-- `calman stop <id>` → 同 source 创建 event（复制字段，`related_to`=原 todo），
-  todo 标 completed
-- `+STARTED` 虚拟标签（可选）
+（info、all-future split/truncate 已完成；start/stop Todo→Event 已完成，见 done.md。）
 
 ##  TUI（Phase 3）
 - 完整左右双栏 TUI：list + detail、编辑、设置 overlay、sync、i18n
