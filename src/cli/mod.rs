@@ -84,6 +84,7 @@ FILTER GRAMMAR (shared by CLI args and report `filter`)
   type:todo | type:event | type:all        (+TODO / +EVENT aliases)
   source:work  -source:work                include / exclude a source
   due:<day> exact | due.before:<   strict < | due.by:<   <= | due.after:>=
+  start:<day> exact | start.before:/start.by:/start.after:  (events' dtstart only)
   status:pending|in-progress|completed|cancelled|recurring|active
   +OVERDUE +PENDING +COMPLETED +CANCELLED +IN-PROCESS +TAGGED +UNTAGGED +SCHEDULED +PARENT
   +tag / -tag

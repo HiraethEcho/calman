@@ -144,9 +144,6 @@ pub struct Contexts {
 /// `[date]` — date-parsing settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DateConfig {
-    /// End of the working week (`eoww`), e.g. `"17:00"`.
-    #[serde(default = "default_workweek_end")]
-    pub workweek_end: String,
     /// Day start for named boundaries (`sod`/`sow`/`som`/…), `"HH:MM:SS"`.
     #[serde(default = "default_day_start")]
     pub day_start: String,
@@ -244,10 +241,6 @@ pub struct RuleStyle {
     pub inverse: bool,
 }
 
-fn default_workweek_end() -> String {
-    "17:00".to_string()
-}
-
 fn default_day_start() -> String {
     "00:00:00".to_string()
 }
@@ -283,7 +276,6 @@ impl DateConfig {
 impl Default for DateConfig {
     fn default() -> Self {
         Self {
-            workweek_end: default_workweek_end(),
             day_start: default_day_start(),
             day_end: default_day_end(),
             default_event_duration: default_event_duration(),

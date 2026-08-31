@@ -105,6 +105,14 @@ pub fn parse_date_value(input: &str) -> Result<DateValue> {
         return Ok(DateValue::Date(d));
     }
 
+    // "MM-DD" → current year, e.g. `08-26`, `9-30`.
+    if let Some((m, d)) = s.split_once('-')
+        && let (Ok(m), Ok(d)) = (m.parse::<u32>(), d.parse::<u32>())
+        && let Some(dt) = NaiveDate::from_ymd_opt(now.date_naive().year(), m, d)
+    {
+        return Ok(DateValue::Date(dt));
+    }
+
     // "HH:MM" → today at that time
     if let Ok(t) = NaiveTime::parse_from_str(&s, "%H:%M") {
         let ndt = now.date_naive().and_time(t);
@@ -224,7 +232,7 @@ fn parse_iso_duration(s: &str) -> Option<Duration> {
     any.then_some(total)
 }
 
-/// Named dates. Week starts Monday (calman default); `eoww` uses 17:00.
+/// Named dates. Week starts Monday (calman default); `eoww` uses `day_end`.
 fn named_date(s: &str) -> Option<DateTime<Utc>> {
     let today = Local::now().date_naive();
     let week_start = monday_of(today);
@@ -272,14 +280,11 @@ fn named_date(s: &str) -> Option<DateTime<Utc>> {
             week_start + Duration::days(6),
             (eh, em, es),
         ),
-        "eoww" => {
-            let (hh, mm) = super::workweek_end();
-            (
-                week_start + Duration::days(4),
-                week_start + Duration::days(4),
-                (hh, mm, 0),
-            )
-        }
+        "eoww" => (
+            week_start + Duration::days(4),
+            week_start + Duration::days(4),
+            (eh, em, es),
+        ),
         "sonw" | "sonww" => (
             week_start + Duration::days(7),
             week_start + Duration::days(7),
@@ -438,6 +443,22 @@ mod tests {
     }
 
     #[test]
+    fn mm_dd_gets_current_year() {
+        let now = Local::now();
+        for s in ["08-26", "8-26", "9-30"] {
+            let d = parse_date_value(s).unwrap();
+            assert_eq!(
+                d,
+                DateValue::Date(NaiveDate::from_ymd_opt(now.year(), s.split_once('-').unwrap().0.trim_start_matches('0').parse().unwrap(), s.split_once('-').unwrap().1.parse().unwrap()).unwrap())
+            );
+        }
+        // 02-29 on a non-leap year → falls through to error
+        let leap_year = now.year();
+        let valid = NaiveDate::from_ymd_opt(leap_year, 2, 29).is_some();
+        assert_eq!(parse_date_value("02-29").is_err(), !valid);
+    }
+
+    #[test]
     fn trailing_digits_fill_from_today() {
         let now = Local::now();
         // 0823 → MMDD this year
@@ -512,7 +533,7 @@ mod tests {
             0
         );
         let eoww = parse_datetime("eoww").unwrap();
-        assert_eq!(eoww.with_timezone(&Local).hour(), 17);
+        assert_eq!(eoww.with_timezone(&Local).hour(), eow.with_timezone(&Local).hour()); // day_end, no workweek_end
         assert_eq!(
             eoww.with_timezone(&Local).weekday().num_days_from_monday(),
             4

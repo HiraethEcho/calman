@@ -9,6 +9,16 @@ There are two shapes of value:
 - **Date-only** — a calendar day, no time. Used for **all-day** items.
 - **Timed** — a specific instant.
 
+Date syntax (all accept either form):
+
+| Form | Meaning |
+| :--- | :------ |
+| `YYYYMMDD` / `YYYY-MM-DD` | a specific day (all-day) |
+| `MM-DD` | that month/day **this year** (e.g. `08-26`, `9-30`) |
+| `T[HH[MM[SS]]]` | today at that time (e.g. `T09` = 09:00) |
+| `YYYYMMDDT[HH[MM[SS]]]` | specific day + time |
+| `HH:MM` | today at that wall-clock time |
+
 ## All-day semantics
 
 A **date-only** `due:` (todo) or `start:` (event) becomes an **all-day** item:
@@ -56,7 +66,7 @@ Start/end boundaries carry a clock time from `[date]`:
 | `eod` | end of today (`day_end`) |
 | `eond` | end of next day (tomorrow `day_end`) |
 | `eow` | end of this week — Sunday `day_end` |
-| `eoww` | end of working week — Friday `workweek_end` |
+| `eoww` | end of working week — Friday `day_end` |
 | `eom` / `eoq` / `eoy` | end of this month / quarter / year (`day_end`) |
 | `eonw` / `eonww` | end of next week (`day_end`) |
 | `eonm` / `eony` | end of next month / year (`day_end`) |
@@ -68,8 +78,7 @@ The week starts on **Monday** (`sow`/`eow`, `soww`/`eoww`).
 ```toml
 [date]
 day_start = "08:00:00"   # sod/sow/som/…
-day_end = "18:30:00"     # eod/eow/eom/…
-workweek_end = "17:00"   # eoww only
+day_end = "18:30:00"     # eod/eow/eom/…（含 eoww）
 ```
 
 ## Other timed tokens
@@ -127,8 +136,8 @@ calman add "wrap up" due:17          # 17th of this month, all-day
 - Times are **24-hour** `HH:MM`. The parser does **not** currently accept
   `2pm`-style clocks or bare weekday names (e.g. `monday`, `fri+1`); use the
   named periods above (`sow`/`eow`, …) or explicit dates instead.
-- `eoww` (end of working week) is computed as **Friday `[date].workweek_end`**
-  (default `17:00`, format `HH:MM` or `HHMM`).
+- `eoww` (end of working week) is computed as **Friday `[date].day_end`**
+  (same clock time as `eow`).
 - All-day `due`/`start` lands at local midnight; timed values keep their
   wall-clock time and are converted to UTC for storage.
 

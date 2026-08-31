@@ -46,7 +46,6 @@ fn main() {
 fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let conf = config::Config::load()?;
-    crate::date::set_workweek_end(&conf.date.workweek_end);
     crate::date::set_day_bounds(&conf.date.day_start, &conf.date.day_end);
     let q = parse(&cli.args)?;
 

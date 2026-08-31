@@ -28,8 +28,6 @@ tui = []
 
 # ----------------------------------------------------------------------- [date]
 [date]
-# End of the working week (`eoww`), e.g. "17:00".
-workweek_end = "17:00"
 # Day start for named boundaries (`sod`/`sow`/`som`/…).
 day_start = "00:00:00"
 # Day end for named boundaries (`eod`/`eow`/`eom`/…).

@@ -34,8 +34,6 @@ tui  = ["work", "personal"]          # TUI 启动时显示; 空 = 全部
 # ------------------------------------------------------------------- [date]
 # 日期解析引擎设置
 [date]
-workweek_end = "17:00"                # eoww (工作周结束) 的截止时刻
-# eoww = 本周五 HH:MM (默认 17:00), 格式 "HH:MM" 或 "HHMM"
 day_start = "00:00:00"               # sod/sow/som 等日界起点 (HH:MM:SS)
 day_end = "23:59:59"                 # eod/eow/eom 等日界终点 (HH:MM:SS)
 default_event_duration = ""           # event 无 end:/duration: 时的默认时长; 空=瞬间日程(仅 DTSTART)

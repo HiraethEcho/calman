@@ -17,9 +17,8 @@ sync = ["work"]                 # Sources for `sync` by default
 tui = ["work", "personal"]      # Sources shown when `tui` starts
 
 [date]
-workweek_end = "17:00"          # `eoww` = Friday HH:MM (configurable)
 day_start = "00:00:00"         # sod/sow/som/…
-day_end = "23:59:59"           # eod/eow/eom/…
+day_end = "23:59:59"           # eod/eow/eom/…（含 eoww）
 default_event_duration = ""     # empty ⇒ instant event (DTSTART only)
 
 [tui]
@@ -362,9 +361,9 @@ Updated:    2026-08-22 09:15
 - **Relative offsets**: `+3d` (3 days later), `-2w` (2 weeks ago), `+1m` (1 month), `+1y` (1 year).
 - **Keywords**: `today` (all‑day), `tomorrow`, `yesterday`, `now`, `eod`;
   start boundaries `sod`/`sow`/`soww`/`som`/… use `[date] day_start`;
-  end boundaries `eow`/`eoww`/`eom`/… use `[date] day_end` (`eoww` uses
-  `workweek_end`); period bounds `sow`/`eow` (week, Monday day_start / Sunday
-  day_end), `soww`/`eoww` (working week, Monday day_start / Friday workweek_end),
+  end boundaries `eow`/`eoww`/`eom`/… use `[date] day_end`; period bounds
+  `sow`/`eow` (week, Monday day_start / Sunday day_end), `soww`/`eoww`
+  (working week, Monday day_start / Friday day_end),
   `som`/`eom`, `soq`/`eoq`, `soy`/`eoy`, `sond`/`eond`, `sonw`/`eonw`,
   `sopw`/`eopw`, `sonm`/`eonm`, `sopm`/`eopm`, `sony`/`eony`, `sopy`/`eopy`.
 - **Compact forms (T-style)**: `20260812` (all‑day), `20260812T090000` (full),

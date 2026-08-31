@@ -17,8 +17,6 @@ pub use natural::{natural_to_rrule, parse_natural_date};
 use anyhow::Result;
 use std::sync::OnceLock;
 
-/// Configured `eoww` end time (`HH:MM`), default 17:00.
-static WORKWEEK_END: OnceLock<(u32, u32)> = OnceLock::new();
 /// Clock time as `(hour, minute, second)`.
 type Hms = (u32, u32, u32);
 /// Day start/end configured from `[date]`.
@@ -26,26 +24,7 @@ type DayBounds = (Hms, Hms);
 /// Configured day start/end (`HH:MM:SS`), defaults 00:00:00 / 23:59:59.
 static DAY_BOUNDS: OnceLock<DayBounds> = OnceLock::new();
 
-/// Set the working-week end time from config (`[date] workweek_end`, `"17:00"`).
-/// Accepts `HH:MM`; falls back to 17:00 on parse failure.
-pub fn set_workweek_end(hhmm: &str) {
-    let t = hhmm.trim();
-    let v = t
-        .split_once(':')
-        .and_then(|(h, m)| Some((h.trim().parse().ok()?, m.trim().parse().ok()?)))
-        .or_else(|| {
-            if t.len() == 4 && t.chars().all(|c| c.is_ascii_digit()) {
-                Some((t[..2].parse().ok()?, t[2..].parse().ok()?))
-            } else {
-                None
-            }
-        })
-        .filter(|(h, m)| *h <= 23 && *m <= 59)
-        .unwrap_or((17, 0));
-    let _ = WORKWEEK_END.set(v);
-}
-
-/// Set day start/end from config (`[date] day_start` / `day_end`,
+/// Set day start/end from config (`[date] day_start` / `day_end`, / `day_end`,
 /// `"HH:MM:SS"`); falls back to 00:00:00 / 23:59:59 on parse failure.
 pub fn set_day_bounds(start: &str, end: &str) {
     let s = parse_hms(start).unwrap_or((0, 0, 0));
@@ -61,11 +40,6 @@ fn parse_hms(s: &str) -> Option<(u32, u32, u32)> {
         _ => return None,
     };
     (h <= 23 && m <= 59 && sec <= 59).then_some((h, m, sec))
-}
-
-/// Current working-week end time.
-pub(crate) fn workweek_end() -> (u32, u32) {
-    *WORKWEEK_END.get().unwrap_or(&(17, 0))
 }
 
 /// Current day start/end times.

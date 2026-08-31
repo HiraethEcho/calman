@@ -60,6 +60,7 @@ pub struct Filter {
     pub priority: Option<u8>,
     pub tags: Vec<String>,
     pub due: Option<(DueOp, DateTime<Utc>)>,
+    pub start: Option<(DueOp, DateTime<Utc>)>,
     pub flags: Vec<Flag>,
 }
 
@@ -141,6 +142,12 @@ impl Filter {
         }
         if let Some((op, dt)) = self.due
             && !due_matches(op, dt, task_date(t))
+        {
+            return false;
+        }
+        // `start:` filters match VEVENT `dtstart` only (todos have none).
+        if let Some((op, dt)) = self.start
+            && !due_matches(op, dt, t.dtstart)
         {
             return false;
         }
@@ -337,6 +344,18 @@ fn parse_atom(tok: &str) -> Result<Expr> {
     if let Some(rest) = lower.strip_prefix("-due:") {
         return Ok(Expr::Not(Box::new(due_atom(DueOp::On, rest)?)));
     }
+    if let Some(rest) = lower.strip_prefix("-start.before:") {
+        return Ok(Expr::Not(Box::new(start_atom(DueOp::Before, rest)?)));
+    }
+    if let Some(rest) = lower.strip_prefix("-start.by:") {
+        return Ok(Expr::Not(Box::new(start_atom(DueOp::By, rest)?)));
+    }
+    if let Some(rest) = lower.strip_prefix("-start.after:") {
+        return Ok(Expr::Not(Box::new(start_atom(DueOp::After, rest)?)));
+    }
+    if let Some(rest) = lower.strip_prefix("-start:") {
+        return Ok(Expr::Not(Box::new(start_atom(DueOp::On, rest)?)));
+    }
     if let Some(rest) = lower
         .strip_prefix("-priority:")
         .or_else(|| lower.strip_prefix("-pri:"))
@@ -389,6 +408,19 @@ fn parse_positive(tok: &str) -> Result<Expr> {
     }
     if let Some(rest) = lower.strip_prefix("due:") {
         return due_atom(DueOp::On, rest);
+    }
+
+    if let Some(rest) = lower.strip_prefix("start.before:") {
+        return start_atom(DueOp::Before, rest);
+    }
+    if let Some(rest) = lower.strip_prefix("start.by:") {
+        return start_atom(DueOp::By, rest);
+    }
+    if let Some(rest) = lower.strip_prefix("start.after:") {
+        return start_atom(DueOp::After, rest);
+    }
+    if let Some(rest) = lower.strip_prefix("start:") {
+        return start_atom(DueOp::On, rest);
     }
 
     if let Some(_rest) = lower.strip_prefix("status:") {
@@ -460,6 +492,15 @@ fn due_atom(op: DueOp, rest: &str) -> Result<Expr> {
     let dt = parse_datetime(rest)?;
     Ok(Expr::Atom(Filter {
         due: Some((op, dt)),
+        ..Filter::default()
+    }))
+}
+
+/// `start:` filter — matches a VEVENT's `dtstart` (events only).
+fn start_atom(op: DueOp, rest: &str) -> Result<Expr> {
+    let dt = parse_datetime(rest)?;
+    Ok(Expr::Atom(Filter {
+        start: Some((op, dt)),
         ..Filter::default()
     }))
 }
@@ -558,6 +599,19 @@ mod tests {
         assert!(parse_expr_str("due.before:now").unwrap().matches(&t));
         assert!(parse_expr_str("due.by:now").unwrap().matches(&t));
         assert!(!parse_expr_str("due.after:now").unwrap().matches(&t));
+    }
+
+    #[test]
+    fn start_before_by_after() {
+        let ev = future_event(); // dtstart in future (relative to `now`)
+        assert!(!parse_expr_str("start.before:now").unwrap().matches(&ev));
+        assert!(!parse_expr_str("start.by:now").unwrap().matches(&ev));
+        assert!(parse_expr_str("start.after:now").unwrap().matches(&ev));
+        // todos have no dtstart → never match start filters
+        let t = todo(10);
+        assert!(!parse_expr_str("start.after:now").unwrap().matches(&t));
+        // negation
+        assert!(parse_expr_str("-start.after:now").unwrap().matches(&t));
     }
 
     #[test]
