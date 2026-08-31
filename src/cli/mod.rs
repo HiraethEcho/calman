@@ -264,12 +264,13 @@ fn expand_occurrences(rows: &mut Vec<Row>, conf: &Config) {
         };
         let ovs = overrides.get(&r.task.uid);
         for occ in occs {
-            let mut t = ovs
-                .and_then(|m| m.get(&occ.occurrence_start))
-                .cloned()
-                .unwrap_or_else(|| occ.master.clone());
-            // A virtual occurrence is a single active instance, not the template.
-            t.status = TaskStatus::Pending;
+            let override_task = ovs.and_then(|m| m.get(&occ.occurrence_start)).cloned();
+            let mut t = override_task.clone().unwrap_or_else(|| occ.master.clone());
+            // A virtual occurrence from the template is a single active instance;
+            // a stored override keeps its own status (e.g. completed).
+            if override_task.is_none() {
+                t.status = TaskStatus::Pending;
+            }
             if t.is_event() {
                 let delta = occ.occurrence_start - t.dtstart.unwrap_or(occ.occurrence_start);
                 t.dtstart = Some(occ.occurrence_start);
@@ -469,24 +470,10 @@ pub fn resolve_targets(
     override_: Option<&[String]>,
     ids: &[String],
 ) -> Result<Vec<(String, String)>> {
-    let sources = resolve_sources(conf, override_, ContextKind::Cli)?;
-    let rows = load_merged(conf, &sources)?;
-    let mut out = Vec::new();
-    for id in ids {
-        if let Ok(n) = id.parse::<usize>() {
-            let row = rows
-                .get(n.checked_sub(1).unwrap_or(usize::MAX))
-                .ok_or_else(|| anyhow::anyhow!("no task with ID `{id}`"))?;
-            out.push((row.task.uid.clone(), row.source.clone()));
-        } else {
-            let found = rows
-                .iter()
-                .find(|r| r.task.uid == *id)
-                .ok_or_else(|| anyhow::anyhow!("no task with UID `{id}`"))?;
-            out.push((found.task.uid.clone(), found.source.clone()));
-        }
-    }
-    Ok(out)
+    Ok(resolve_targets_occ(conf, override_, ids, None)?
+        .into_iter()
+        .map(|t| (t.uid, t.source))
+        .collect())
 }
 
 #[cfg(all(test, feature = "storage-jsonl"))]

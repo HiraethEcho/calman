@@ -56,8 +56,9 @@ pub fn parse_date_value(input: &str) -> Result<DateValue> {
     // Relative offsets: +3d, -2w, +1m, +1y, +2h, -1s (against now)
     if let Some(rest) = s.strip_prefix(['+', '-']) {
         let unit = rest.chars().last().unwrap_or('d');
+        let num = rest.strip_suffix(unit).unwrap_or(rest);
         if !unit.is_ascii_digit()
-            && let Ok(n) = rest[..rest.len() - 1].parse::<i64>()
+            && let Ok(n) = num.parse::<i64>()
         {
             let sign: i64 = if s.starts_with('+') { 1 } else { -1 };
             let now_utc = Utc::now();
