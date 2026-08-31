@@ -112,7 +112,7 @@ pub fn apply_rc(report: &mut Report, rcs: &[RcReport], name: &str) -> Result<()>
                     c.format = fmt.map(|s| s.to_string());
                     // `date`/`due` columns keep feature defaults unless the
                     // rc override explicitly sets a format (see `date_col`).
-                    if matches!(c.field.as_str(), "date" | "due") && c.format.is_none() {
+                    if matches!(c.field.as_str(), "date" | "due" | "start" | "from") && c.format.is_none() {
                         c.todo_format = Some("relative".to_string());
                     }
                     cols.push(c);
@@ -353,9 +353,8 @@ fn cell(conf: &Config, r: &Row, c: &Column) -> String {
         "summary" => maybe_truncate(t.summary.as_str(), c),
         "desc" => maybe_truncate(t.description.as_deref().unwrap_or(""), c),
         "tags" => t.tags.join(","),
-        "date" => date_str(r, c),
-        // Backwards-compatible alias: `due` == `date`.
-        "due" => date_str(r, c),
+        // Unified date column; `due`/`start`/`from` are aliases of `date`.
+        "date" | "due" | "start" | "from" => date_str(r, c),
         "pri" => pri_str(t.priority),
         "source" => t.source.clone(),
         "recur" | "recurrence" => t
@@ -558,7 +557,7 @@ fn sort_val(r: &Row, field: &str) -> SVal {
         "id" => SVal::Num(r.id as i64),
         "created" => SVal::Num(t.created_at.timestamp()),
         "updated" => SVal::Num(t.updated_at.timestamp()),
-        "due" | "date" => SVal::Num(
+        "due" | "date" | "start" | "from" => SVal::Num(
             if t.is_event() {
                 t.dtstart.map(|d| d.timestamp())
             } else {

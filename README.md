@@ -16,7 +16,7 @@ cargo build --release          # binary: target/release/calman
 
 ```sh
 calman add "buy milk" due:tomorrow pri:H +home
-calman add "standup" start:tomorrow recur:daily        # event, daily
+calman add "standup" from:tomorrow recur:daily        # event, daily
 calman                                          # → `next` report
 calman list source:work
 calman done 1
@@ -61,16 +61,16 @@ location = "~/calman/remote"
 collection with a composite name:
 
 ```sh
-calman add "meet" start:tomorrow source:remote/sorge
+calman add "meet" from:tomorrow source:remote/sorge
 calman list source:remote          # expands all collections
 ```
 
 ## Tasks & events
 
 - **Todo**: `add <text> due:<date> …`
-- **Event**: `add <text> start:<date> [end:<date> | duration:<dur>] …`
+- **Event**: `add <text> from:<date> [to:<date> | for:<dur>] …`
 
-A date-only `due:`/`start:` is stored as an all-day item (`DUE;VALUE=DATE` /
+A date-only `due:`/`from:` is stored as an all-day item (`DUE;VALUE=DATE` /
 `DTSTART;VALUE=DATE` in ICS) — compatible with iOS Reminders.
 
 ## Recurrence (`recur:` / `repeat:`)

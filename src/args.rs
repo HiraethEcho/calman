@@ -61,13 +61,13 @@ pub struct ParsedArgs {
     pub rc_reports: Vec<RcReport>,
     /// Raw filter tokens (post-command, non-rc, non-id) for list/count.
     pub filter_tokens: Vec<String>,
-    pub start: Option<String>,
-    pub end: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
     pub location: Option<String>,
     pub repeat: Option<String>,
     pub description: Option<String>,
-    /// `duration:1h` / `duration:45min` — alternative to `end:`.
-    pub duration: Option<String>,
+    /// `for:1h` / `for:45min` — event length, alternative to `to:`.
+    pub span: Option<String>,
     /// `allday` or `+allday` flag.
     pub allday: bool,
     /// `alert:15min` — VALARM lead time before start/due.
@@ -96,12 +96,11 @@ fn is_attr_token(t: &str) -> bool {
         || l.starts_with("source:")
         || l.starts_with("src:")
         || l.starts_with("due:")
-        || l.starts_with("start:")
-        || l.starts_with("end:")
+        || l.starts_with("from:")
+        || l.starts_with("to:")
         || l.starts_with("repeat:")
         || l.starts_with("recur:")
-        || l.starts_with("duration:")
-        || l.starts_with("dur:")
+        || l.starts_with("for:")
         || l.starts_with("alert:")
         || l.starts_with("desc:")
         || l.starts_with("location:")
@@ -227,10 +226,10 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
             q.rel = Some(rest.to_string());
         } else if let Some(rest) = lower.strip_prefix("wait:") {
             q.wait = Some(rest.to_string());
-        } else if let Some(rest) = lower.strip_prefix("start:") {
-            q.start = Some(rest.to_string());
-        } else if let Some(rest) = lower.strip_prefix("end:") {
-            q.end = Some(rest.to_string());
+        } else if let Some(rest) = lower.strip_prefix("from:") {
+            q.from = Some(rest.to_string());
+        } else if let Some(rest) = lower.strip_prefix("to:") {
+            q.to = Some(rest.to_string());
         } else if let Some(rest) = lower.strip_prefix("location:") {
             if rest.is_empty() {
                 q.location = Some(String::new());
@@ -243,10 +242,8 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
             .or_else(|| lower.strip_prefix("recur:"))
         {
             q.repeat = Some(rest.to_string());
-        } else if let Some(rest) = lower.strip_prefix("duration:") {
-            q.duration = Some(rest.to_string());
-        } else if let Some(rest) = lower.strip_prefix("dur:") {
-            q.duration = Some(rest.to_string());
+        } else if let Some(rest) = lower.strip_prefix("for:") {
+            q.span = Some(rest.to_string());
         } else if let Some(rest) = lower.strip_prefix("alert:") {
             q.alert = Some(rest.to_string());
         } else if let Some(rest) = lower.strip_prefix("desc:") {
@@ -321,7 +318,7 @@ fn is_filter_only_minus(name: &str) -> bool {
         || strip_prefix_ci(&l, "priority:").is_some()
         || strip_prefix_ci(&l, "pri:").is_some()
         || strip_prefix_ci(&l, "date").is_some()
-        || strip_prefix_ci(&l, "start").is_some()
+        || strip_prefix_ci(&l, "from").is_some()
         || strip_prefix_ci(&l, "due").is_some()
 }
 
@@ -436,21 +433,28 @@ mod tests {
         let q = p(&[
             "add",
             "Meet",
-            "start:0826T0900",
-            "duration:45min",
+            "from:0826T0900",
+            "for:45min",
             "alert:15min",
             "+team",
         ]);
-        assert_eq!(q.duration.as_deref(), Some("45min"));
+        assert_eq!(q.span.as_deref(), Some("45min"));
         assert_eq!(q.alert.as_deref(), Some("15min"));
-        let q2 = p(&["add", "Conf", "start:20260826", "allday"]);
+        let q2 = p(&["add", "Conf", "from:20260826", "allday"]);
         assert!(q2.allday);
     }
 
     #[test]
-    fn dur_alias() {
-        let q = p(&["add", "x", "start:25T0930", "dur:1h"]);
-        assert_eq!(q.duration.as_deref(), Some("1h"));
+    fn for_duration() {
+        let q = p(&["add", "x", "from:25T0930", "for:1h"]);
+        assert_eq!(q.span.as_deref(), Some("1h"));
+    }
+
+    #[test]
+    fn old_event_syntax_is_plain_text() {
+        // Renamed tokens are no longer special: they flow into task text.
+        let q = p(&["add", "x", "start:20260901"]);
+        assert_eq!(q.text, "x start:20260901");
     }
 
     #[test]

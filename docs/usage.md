@@ -36,17 +36,17 @@ calman add <TEXT> [ATTRIBUTES...]
 
 What you pass decides the kind:
 
-- **Todo** — give `due:` (and no `start:`).
-- **Event** — give `start:` (optionally `end:` or `duration:`).
+- **Todo** — give `due:` (and no `from:`).
+- **Event** — give `from:` (optionally `to:` or `for:`).
 
 `add` writes to `source:` if given (exactly **one** source; multiple is an
 error), otherwise to `[defaults].write_source`.
 
 ```sh
 calman add "buy milk" due:tomorrow pri:H +home
-calman add "standup" start:tomorrow recur:daily          # event, daily
-calman add "lunch" start:T1200 duration:45min +team
-calman add "review" start:2026-09-01 end:2026-09-01 15:00 source:work
+calman add "standup" from:tomorrow recur:daily          # event, daily
+calman add "lunch" from:T1200 for:45min +team
+calman add "review" from:2026-09-01 to:2026-09-01 15:00 source:work
 ```
 
 See [Tasks & events](tasks.md) for the full attribute table.
@@ -105,20 +105,20 @@ calman <ID>... modify [TEXT] [ATTRIBUTES...]
 ```
 
 Bare words **replace the summary** (Taskwarrior semantics). `+tag` adds a tag,
-`-tag` removes it. The same attributes as `add` apply (`due:`, `start:`, `end:`,
-`duration:`, `pri:`, `status:`, `location:`, `recur:`/`repeat:`, `alert:`,
+`-tag` removes it. The same attributes as `add` apply (`due:`, `from:`, `to:`,
+`for:`, `pri:`, `status:`, `location:`, `recur:`/`repeat:`, `alert:`,
 `desc:`, `rel:`, `allday`).
 
 ```sh
 calman 1 modify new content pri:L -home due:20260824
 calman 2 modify +urgent status:in-progress
-calman 3 modify start:tomorrow allday    # convert to an all-day event
+calman 3 modify from:tomorrow allday    # convert to an all-day event
 ```
 
 Notes:
 - `+allday` converts the target to all-day (drops times and `DTEND`); any
-  `start:` makes it a timed event again. There is no `-allday`.
-- A date-only `start:` on `modify` makes the event all-day (local midnight, no
+  `from:` makes it a timed event again. There is no `-allday`.
+- A date-only `from:` on `modify` makes the event all-day (local midnight, no
   implicit hour) — the same as `add`.
 
 ---

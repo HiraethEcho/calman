@@ -10,7 +10,7 @@ Taskwarrior-style CLI and a planned TUI. Data lives locally as `jsonl` or
 - [Introduction](introduction.md) — what calman is and its design philosophy
 - [Install](install.md) — build from source, config directory, two config tiers, first run
 - [Usage](usage.md) — every command with syntax, common options, and examples
-- [Writing dates](dates.md) — date/time syntax for `due:` / `start:` and all-day semantics
+- [Writing dates](dates.md) — date/time syntax for `due:` / `from:` and all-day semantics
 - [Tasks & events](tasks.md) — adding todos and events, attributes, relations
 - [Filters](filters.md) — the shared filter grammar used by the CLI and reports
 - [Reports](reports.md) — built-in reports, `rc` overrides, icons, and colors

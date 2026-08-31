@@ -23,8 +23,8 @@ fn default_report_hides_past_events_and_rc_override_works() {
     let home = dir.path();
 
     assert!(calman(home, &["add", "todo task", "due:tomorrow"]).1);
-    assert!(calman(home, &["add", "future event", "start:tomorrow"]).1);
-    assert!(calman(home, &["add", "past event", "start:20260101"]).1);
+    assert!(calman(home, &["add", "future event", "from:tomorrow"]).1);
+    assert!(calman(home, &["add", "past event", "from:20260101"]).1);
 
     let (out, ok) = calman(home, &["next"]);
     assert!(ok);
@@ -139,7 +139,7 @@ fn modify_date_only_start_becomes_allday() {
     let dir = tempdir().unwrap();
     let home = dir.path();
     // Default config writes to the `work` jsonl source.
-    assert!(calman(home, &["add", "evt", "start:T0900", "dur:1h"]).1);
+    assert!(calman(home, &["add", "evt", "from:T0900", "for:1h"]).1);
     let (out, _) = calman(home, &["list"]);
     let id = strip_ansi(&out)
         .lines()
@@ -149,7 +149,7 @@ fn modify_date_only_start_becomes_allday() {
         .next()
         .unwrap()
         .to_string();
-    assert!(calman(home, &["modify", &id, "start:20260828"]).1);
+    assert!(calman(home, &["modify", &id, "from:20260828"]).1);
     let jsonl = std::fs::read_to_string(home.join(".local/share/calman/work/tasks.jsonl")).unwrap();
     let line = jsonl.lines().find(|l| l.contains("\"summary\":\"evt\"")).unwrap();
     assert!(line.contains("\"allday\":true"), "expected all-day: {line}");

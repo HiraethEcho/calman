@@ -8,7 +8,7 @@ item's `rrule` (rendered as `RRULE:` in ICS).
 ```sh
 calman add "gym" due:tomorrow recur:every monday and wednesday for 8 weeks
 calman add "pay rent" due:eom recur:FREQ=MONTHLY;UNTIL=20261231
-calman add "standup" start:tomorrow recur:daily
+calman add "standup" from:tomorrow recur:daily
 ```
 
 Recurrence applies to **both todos and events**.
@@ -40,7 +40,7 @@ recur:P2W → FREQ=WEEKLY;INTERVAL=2
 recur:P1M → FREQ=MONTHLY
 ```
 
-`alert:`/`duration:` accept ISO 8601 durations too: `PT15M`, `PT1H30M`,
+`alert:`/`for:` accept ISO 8601 durations too: `PT15M`, `PT1H30M`,
 `P7D`, `P2W`.
 
 ### 3. Friendly grammar
@@ -80,7 +80,7 @@ Weekday codes: `mon`→`MO`, `tue`→`TU`, `wed`→`WE`, `thu`→`TH`, `fri`→`
 
 ```sh
 # a school-class pattern: Tue & Fri, 7 weeks total
-calman add "class" start:tomorrow recur:"every tuesday and friday for 7 weeks"
+calman add "class" from:tomorrow recur:"every tuesday and friday for 7 weeks"
 
 # bills on the last day of each month, forever
 calman add "rent" due:eom recur:monthly
@@ -95,7 +95,7 @@ calman add "pill" due:today recur:"FREQ=DAILY;UNTIL=20260925"
   prefix, so exported `.ics` files are valid RFC 5545.
 - Raw passthrough preserves rules produced by iOS Reminders and Outlook
   byte-for-byte, so importing/exporting keeps recurrence intact.
-- All-day recurrence (`due:`/`start:` date-only) is stored with `VALUE=DATE`,
+- All-day recurrence (`due:`/`from:` date-only) is stored with `VALUE=DATE`,
   matching how iOS Reminders represents all-day repeating items.
 
 ## Series model (Taskwarrior-style)

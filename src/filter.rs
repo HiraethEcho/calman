@@ -62,7 +62,8 @@ pub struct Filter {
     pub due: Option<(DueOp, DateTime<Utc>)>,
     /// `date:` filter — unified date: todo→due, event→dtstart.
     pub date: Option<(DueOp, DateTime<Utc>)>,
-    pub start: Option<(DueOp, DateTime<Utc>)>,
+    /// `from:` filter — VEVENT `dtstart` only.
+    pub from: Option<(DueOp, DateTime<Utc>)>,
     pub flags: Vec<Flag>,
 }
 
@@ -153,9 +154,9 @@ impl Filter {
         {
             return false;
         }
-        // `start:` filters match VEVENT `dtstart` only; a todo (no dtstart)
+        // `from:` filters match VEVENT `dtstart` only; a todo (no dtstart)
         // never matches, so it must also not slip through the negation.
-        if let Some((op, dt)) = self.start {
+        if let Some((op, dt)) = self.from {
             let ok = match t.dtstart {
                 Some(start) => due_matches(op, dt, Some(start)),
                 None => false,
@@ -369,17 +370,17 @@ fn parse_atom(tok: &str) -> Result<Expr> {
     if let Some(rest) = lower.strip_prefix("-date:") {
         return Ok(Expr::Not(Box::new(field_atom(DateField::Date, DueOp::On, rest)?)));
     }
-    if let Some(rest) = lower.strip_prefix("-start.before:") {
-        return Ok(Expr::Not(Box::new(field_atom(DateField::Start, DueOp::Before, rest)?)));
+    if let Some(rest) = lower.strip_prefix("-from.before:") {
+        return Ok(Expr::Not(Box::new(field_atom(DateField::From, DueOp::Before, rest)?)));
     }
-    if let Some(rest) = lower.strip_prefix("-start.by:") {
-        return Ok(Expr::Not(Box::new(field_atom(DateField::Start, DueOp::By, rest)?)));
+    if let Some(rest) = lower.strip_prefix("-from.by:") {
+        return Ok(Expr::Not(Box::new(field_atom(DateField::From, DueOp::By, rest)?)));
     }
-    if let Some(rest) = lower.strip_prefix("-start.after:") {
-        return Ok(Expr::Not(Box::new(field_atom(DateField::Start, DueOp::After, rest)?)));
+    if let Some(rest) = lower.strip_prefix("-from.after:") {
+        return Ok(Expr::Not(Box::new(field_atom(DateField::From, DueOp::After, rest)?)));
     }
-    if let Some(rest) = lower.strip_prefix("-start:") {
-        return Ok(Expr::Not(Box::new(field_atom(DateField::Start, DueOp::On, rest)?)));
+    if let Some(rest) = lower.strip_prefix("-from:") {
+        return Ok(Expr::Not(Box::new(field_atom(DateField::From, DueOp::On, rest)?)));
     }
     if let Some(rest) = lower
         .strip_prefix("-priority:")
@@ -448,17 +449,17 @@ fn parse_positive(tok: &str) -> Result<Expr> {
         return field_atom(DateField::Date, DueOp::On, rest);
     }
 
-    if let Some(rest) = lower.strip_prefix("start.before:") {
-        return field_atom(DateField::Start, DueOp::Before, rest);
+    if let Some(rest) = lower.strip_prefix("from.before:") {
+        return field_atom(DateField::From, DueOp::Before, rest);
     }
-    if let Some(rest) = lower.strip_prefix("start.by:") {
-        return field_atom(DateField::Start, DueOp::By, rest);
+    if let Some(rest) = lower.strip_prefix("from.by:") {
+        return field_atom(DateField::From, DueOp::By, rest);
     }
-    if let Some(rest) = lower.strip_prefix("start.after:") {
-        return field_atom(DateField::Start, DueOp::After, rest);
+    if let Some(rest) = lower.strip_prefix("from.after:") {
+        return field_atom(DateField::From, DueOp::After, rest);
     }
-    if let Some(rest) = lower.strip_prefix("start:") {
-        return field_atom(DateField::Start, DueOp::On, rest);
+    if let Some(rest) = lower.strip_prefix("from:") {
+        return field_atom(DateField::From, DueOp::On, rest);
     }
 
     if let Some(_rest) = lower.strip_prefix("status:") {
@@ -533,8 +534,8 @@ enum DateField {
     Due,
     /// `date:` — unified date (same as `due`, explicit alias).
     Date,
-    /// `start:` — VEVENT `dtstart` only.
-    Start,
+    /// `from:` — VEVENT `dtstart` only.
+    From,
 }
 
 fn field_atom(field: DateField, op: DueOp, rest: &str) -> Result<Expr> {
@@ -542,7 +543,7 @@ fn field_atom(field: DateField, op: DueOp, rest: &str) -> Result<Expr> {
     let f = Filter {
         due: (matches!(field, DateField::Due)).then_some((op, dt)),
         date: (matches!(field, DateField::Date)).then_some((op, dt)),
-        start: (matches!(field, DateField::Start)).then_some((op, dt)),
+        from: (matches!(field, DateField::From)).then_some((op, dt)),
         ..Filter::default()
     };
     Ok(Expr::Atom(f))
@@ -663,16 +664,16 @@ mod tests {
     }
 
     #[test]
-    fn start_before_by_after() {
+    fn from_before_by_after() {
         let ev = future_event(); // dtstart in future (relative to `now`)
-        assert!(!parse_expr_str("start.before:now").unwrap().matches(&ev));
-        assert!(!parse_expr_str("start.by:now").unwrap().matches(&ev));
-        assert!(parse_expr_str("start.after:now").unwrap().matches(&ev));
-        // todos have no dtstart → never match start filters
+        assert!(!parse_expr_str("from.before:now").unwrap().matches(&ev));
+        assert!(!parse_expr_str("from.by:now").unwrap().matches(&ev));
+        assert!(parse_expr_str("from.after:now").unwrap().matches(&ev));
+        // todos have no dtstart → never match from filters
         let t = todo(10);
-        assert!(!parse_expr_str("start.after:now").unwrap().matches(&t));
+        assert!(!parse_expr_str("from.after:now").unwrap().matches(&t));
         // negation
-        assert!(parse_expr_str("-start.after:now").unwrap().matches(&t));
+        assert!(parse_expr_str("-from.after:now").unwrap().matches(&t));
     }
 
     #[test]

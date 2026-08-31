@@ -12,7 +12,7 @@ Two kinds of item live in calman:
 - **Todos** (iCalendar `VTODO`) — have a `due` date.
 - **Events** (iCalendar `VEVENT`) — have a `dtstart` (and optionally `dtend`).
 
-The distinction is automatic: if you give a `start:` it becomes an event; if you
+The distinction is automatic: if you give a `from:` it becomes an event; if you
 give a `due:` it becomes a todo. Internally both are the same `Task` record, so
 filters, reports, and recurrence treat them uniformly.
 

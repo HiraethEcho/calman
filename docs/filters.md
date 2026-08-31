@@ -17,7 +17,7 @@ against the **unified** item: todos compare `due`, events compare `dtstart`.
 | `due.after:<date>` | On or after (`>=`). |
 | `date:<day>` | Exact day on the **unified** date (todo→`due`, event→`dtstart`). |
 | `date.before:` / `date.by:` / `date.after:` | Same operators on the unified date. |
-| `start:<day>` / `start.before:` / `start.by:` / `start.after:` | VEVENT `dtstart` only; todos never match. |
+| `from:<day>` / `from.before:` / `from.by:` / `from.after:` | VEVENT `dtstart` only; todos never match. |
 | `status:pending\|in-progress\|completed\|cancelled\|recurring\|active` | Lifecycle status (`active` = pending/in-progress; `recurring` = series master). |
 | `+WAITING` / `-WAITING` | Hidden-by-wait: item has a `wait` in the future. Default reports exclude them. |
 | `priority:<lvl>` (alias `pri:<lvl>`) | `high`/`h`/`9`, `medium`/`m`/`5`, `low`/`l`/`1`, or 0–9. |

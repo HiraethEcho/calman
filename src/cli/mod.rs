@@ -38,7 +38,7 @@ pub fn print_filter_help() {
         r#"calman — task & event manager (CLI)
 
 COMMANDS
-  calman add <text> [opts]        add todo (due:) or event (start:)
+  calman add <text> [opts]        add todo (due:) or event (from:)
   calman list|ls|next [filter]   run a report (bare `calman` → next)
   calman done <id>               mark completed
   calman delete <id>             hard delete
@@ -49,8 +49,8 @@ COMMANDS
 
 COMMON OPTIONS (add / modify)
   due:<date>        todo deadline (date-only → all-day todo)
-  start:<date>      event start (date-only → all-day event)
-  end:<date> duration:<dur>  event end
+  from:<date>       event start (date-only → all-day event)
+  to:<date> for:<dur>  event end / length
   pri:H|M|L         priority (9/5/1)
   +tag -tag         tags
   source:<name>     write/list source (ics-dir: `name/collection`)
@@ -88,7 +88,7 @@ FILTER GRAMMAR (shared by CLI args and report `filter`)
   source:work  -source:work                include / exclude a source
   due:<day> exact | due.before:<   strict < | due.by:<   <= | due.after:>=
   date:<day> (unified: todo→due, event→dtstart) + date.before:/date.by:/date.after:
-  start:<day> exact | start.before:/start.by:/start.after:  (events' dtstart only)
+  from:<day> exact | from.before:/from.by:/from.after:  (events' dtstart only)
   status:pending|in-progress|completed|cancelled|recurring|active
   +OVERDUE +PENDING +COMPLETED +CANCELLED +IN-PROCESS +TAGGED +UNTAGGED +SCHEDULED +PARENT
   +tag / -tag

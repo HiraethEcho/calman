@@ -3,10 +3,10 @@
 calman stores a single unified record. Whether it is a **todo** or an **event**
 depends on which date attribute you supply:
 
-- **Todo** — `due:` present, `start:` absent.
-- **Event** — `start:` present (with optional `end:` or `duration:`).
+- **Todo** — `due:` present, `from:` absent.
+- **Event** — `from:` present (with optional `to:` or `for:`).
 
-Giving **both** `due:` and `start:` is an error.
+Giving **both** `due:` and `from:` is an error.
 
 ## Adding a todo
 
@@ -21,26 +21,26 @@ A date-only `due:` (e.g. `due:tomorrow`, `due:20260826`) is stored as an
 ## Adding an event
 
 ```sh
-calman add "standup" start:tomorrow recur:daily
-calman add "lunch" start:T1200 duration:45min +team
-calman add "demo" start:2026-09-01 end:2026-09-01 15:00 location:"Zoom"
-calman add "conference" start:2026-10-12 allday
+calman add "standup" from:tomorrow recur:daily
+calman add "lunch" from:T1200 for:45min +team
+calman add "demo" from:2026-09-01 to:2026-09-01 15:00 location:"Zoom"
+calman add "conference" from:2026-10-12 allday
 ```
 
-- `start:` with a date-only value → all-day event.
-- If neither `end:` nor `duration:` is given, a timed event defaults to
+- `from:` with a date-only value → all-day event.
+- If neither `to:` nor `for:` is given, a timed event defaults to
   `[date].default_event_duration`; empty (default) ⇒ instant event (only
   `DTSTART`, no `DTEND`); an all-day event with no end spans a single day.
-- `allday` (or `+allday`) forces all-day even with a timed `start:`.
+- `allday` (or `+allday`) forces all-day even with a timed `from:`.
 
 ## Attributes
 
 | Attribute | Kind | Effect |
 | :-------- | :--- | :----- |
 | `due:<date>` | todo | Deadline. Date-only → all-day todo. |
-| `start:<date>` | event | Start time. Date-only → all-day event. |
-| `end:<date>` | event | End time/date (alternative to `duration:`). All-day `end` is the **last included day** (stored as day-after). |
-| `duration:<dur>` | event | Length, e.g. `45min`, `1h`, `1h30m`, `2d`, or ISO 8601 `PT15M`/`P7D`. Alternative to `end:`. |
+| `from:<date>` | event | Start time. Date-only → all-day event. |
+| `to:<date>` | event | End time/date (alternative to `for:`). All-day `to` is the **last included day** (stored as day-after). |
+| `for:<dur>` | event | Length, e.g. `45min`, `1h`, `1h30m`, `2d`, or ISO 8601 `PT15M`/`P7D`. Alternative to `to:`. |
 | `allday` / `+allday` | event | Force all-day (drops times & `DTEND`). |
 | `pri:H\|M\|L` (or `pri:<0-9>`) | both | Priority — `H`=9, `M`=5, `L`=1, or 0–9. |
 | `+tag` / `-tag` | both | Tags (`-tag` only removes on `modify`). |
@@ -56,7 +56,7 @@ calman add "conference" start:2026-10-12 allday
 Example combining several:
 
 ```sh
-calman add "1:1 with boss" start:2026-08-29 14:30 duration:30min \
+calman add "1:1 with boss" from:2026-08-29 14:30 for:30min \
   pri:H +1on1 location:"Office" alert:10min recur:weekly
 ```
 
@@ -91,6 +91,6 @@ RFC 5545 `RRULE` (iOS / Outlook / CalDAV compatible). See the dedicated
   auto-discovered and referenced as `source:<name>/<collection>`:
 
 ```sh
-calman add "meet" start:tomorrow source:remote/sorge     # one collection
+calman add "meet" from:tomorrow source:remote/sorge     # one collection
 calman list source:remote                                # expands all collections
 ```

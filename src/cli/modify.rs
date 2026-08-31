@@ -27,12 +27,12 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         && q.status.is_none()
         && q.tags.is_empty()
         && q.anti_tags.is_empty()
-        && q.start.is_none()
-        && q.end.is_none()
+        && q.from.is_none()
+        && q.to.is_none()
         && q.location.is_none()
         && q.repeat.is_none()
         && q.description.is_none()
-        && q.duration.is_none()
+        && q.span.is_none()
         && !q.allday
         && q.alert.is_none()
         && q.rel.is_none()
@@ -41,7 +41,7 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         bail!("no changes specified");
     }
 
-    let (start, start_allday) = if let Some(s) = &q.start {
+    let (from, from_allday) = if let Some(s) = &q.from {
         match parse_date_value(s)? {
             // Date-only `start:` → all-day event at local midnight.
             DateValue::Date(d) => (Some(local_midnight(d)), true),
@@ -50,13 +50,13 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
     } else {
         (None, false)
     };
-    let end = q.end.as_deref().map(parse_date_value).transpose()?;
-    let dur = q.duration.as_deref().map(parse_duration).transpose()?;
-    if end.is_some() && dur.is_some() {
-        bail!("use either `end:` or `duration:`, not both");
+    let to = q.to.as_deref().map(parse_date_value).transpose()?;
+    let dur = q.span.as_deref().map(parse_duration).transpose()?;
+    if to.is_some() && dur.is_some() {
+        bail!("use either `to:` or `for:`, not both");
     }
-    if (end.is_some() || dur.is_some()) && q.start.is_none() && q.allday {
-        bail!("`end:`/`duration:` need a timed event; give `start:` too or drop allday");
+    if (to.is_some() || dur.is_some()) && q.from.is_none() && q.allday {
+        bail!("`to:`/`for:` need a timed event; give `from:` too or drop allday");
     }
     let alert = match &q.alert {
         Some(a) => {
@@ -98,10 +98,10 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         repeat: q.repeat.clone(),
         description: q.description.clone(),
         allday: q.allday,
-        start,
-        start_allday,
-        end,
-        duration: dur,
+        from,
+        from_allday,
+        to,
+        span: dur,
         alert,
         related: related.clone(),
         default_duration,
@@ -160,10 +160,10 @@ struct Upd {
     repeat: Option<String>,
     description: Option<String>,
     allday: bool,
-    start: Option<DateTime<Utc>>,
-    start_allday: bool,
-    end: Option<DateValue>,
-    duration: Option<Duration>,
+    from: Option<DateTime<Utc>>,
+    from_allday: bool,
+    to: Option<DateValue>,
+    span: Option<Duration>,
     alert: Option<i64>,
     related: Option<String>,
     default_duration: Option<Duration>,
@@ -226,30 +226,30 @@ fn apply(t: &mut Task, u: &Upd) -> Result<()> {
         t.dtend = None;
     }
 
-    if let Some(s) = u.start {
-        // Adding `start:` converts the item to a VEVENT.
+    if let Some(s) = u.from {
+        // Adding `from:` converts the item to a VEVENT.
         t.event = true;
-        // Date-only `start:` keeps the event all-day; date-time makes it timed.
-        t.allday = u.start_allday;
+        // Date-only `from:` keeps the event all-day; date-time makes it timed.
+        t.allday = u.from_allday;
         t.dtstart = Some(s);
-        if u.start_allday {
+        if u.from_allday {
             t.dtend = None; // drop any stale timed end; all-day end is implicit
         }
     }
 
     if let Some(s) = t.dtstart {
-        if let Some(e) = &u.end {
+        if let Some(e) = &u.to {
             t.dtend = Some(resolve_end(s, t.allday, *e)?);
-        } else if let Some(d) = u.duration {
+        } else if let Some(d) = u.span {
             t.dtend = Some(s + d);
-        } else if u.start.is_some() && !t.allday && t.dtend.is_none() {
+        } else if u.from.is_some() && !t.allday && t.dtend.is_none() {
             // Newly timed event without explicit end → default duration (if any).
             if let Some(d) = u.default_duration {
                 t.dtend = Some(s + d);
             }
         }
-    } else if u.end.is_some() || u.duration.is_some() {
-        bail!("target has no start; use `start:` to make it an event first");
+    } else if u.to.is_some() || u.span.is_some() {
+        bail!("target has no start; use `from:` to make it an event first");
     }
 
     // Keep allday invariant: DTEND must stay after DTSTART (exclusive).

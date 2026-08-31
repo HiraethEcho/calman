@@ -21,7 +21,7 @@ Date syntax (all accept either form):
 
 ## All-day semantics
 
-A **date-only** `due:` (todo) or `start:` (event) becomes an **all-day** item:
+A **date-only** `due:` (todo) or `from:` (event) becomes an **all-day** item:
 
 - stored as `DUE;VALUE=DATE` / `DTSTART;VALUE=DATE` in ICS (no time component),
   which is what iOS Reminders and most CalDAV clients expect;
@@ -102,7 +102,7 @@ day_end = "18:30:00"     # eod/eow/eom/…（含 eoww）
 ```sh
 calman add "pay rent" due:+5d
 calman add "retro" due:-1w
-calman add "standup" start:+2h
+calman add "standup" from:+2h
 ```
 
 > Note: `+1m` means **about a month**, *not* one minute. Clock times use the
@@ -125,9 +125,9 @@ calman add "standup" start:+2h
 
 ```sh
 calman add "release" due:2026-09-01
-calman add "call" start:2026-08-26 15:00
-calman add "dentist" start:0826T0930
-calman add "coffee" start:T0900
+calman add "call" from:2026-08-26 15:00
+calman add "dentist" from:0826T0930
+calman add "coffee" from:T0900
 calman add "wrap up" due:17          # 17th of this month, all-day
 ```
 

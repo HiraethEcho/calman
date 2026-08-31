@@ -174,10 +174,10 @@ calman modify <TEXT> [ATTRS...] # bare text replaces the summary
     - `due:<DATE>`: natural‑language date (Todo)
     - `+<tag>`: add a tag (repeatable)
     - `desc:<TEXT>`: long description
-    - Event fields (`start:` present → event, absent → todo):
-        - `start:<DATE>` / `end:<DATE>` — forms below; `end` treated the same as `start`
-        - `duration:<DUR>` — `45min`, `1h`, `1h30m`, `2d`; alternative to `end:`
-        - `allday` — force all‑day (date‑only); date‑only `start:` auto‑all‑day
+    - Event fields (`from:` present → event, absent → todo):
+        - `from:<DATE>` / `to:<DATE>` — forms below; `to` is the end (longer than `from`)
+        - `for:<DUR>` — `45min`, `1h`, `1h30m`, `2d`; alternative to `to:`
+        - `allday` — force all‑day (date‑only); date‑only `from:` auto‑all‑day
         - `alert:<DUR>` — VALARM lead time, e.g. `alert:15min` → `TRIGGER:-PT900S`
         - `location:<TEXT>`, `recur:<RULE>` — recurrence; alias `repeat:`
     - Date‑only `due:` (Todo) is an all‑day todo: stored as `DUE;VALUE=DATE` and
@@ -197,7 +197,7 @@ calman modify <TEXT> [ATTRS...] # bare text replaces the summary
       `RECURRENCE-ID` override sibling; `delete` on an occurrence ⇒ `EXDATE`;
       `modify` on an occurrence ⇒ sibling component with same `UID` +
       `RECURRENCE-ID` (iOS Calendar compatible).
-    - No `end:`/`duration:` → `[date] default_event_duration`; empty (default)
+    - No `to:`/`for:` → `[date] default_event_duration`; empty (default)
       ⇒ instant event (no `DTEND`); all‑day with no end → single day (no `DTEND`).
 
 **Date input forms** (start/end/due): `20260812` (all‑day), `20260812T090000`, `0826T0900` (this year, trailing‑fill), `T0900` (today), `0826` (this year), `25` (this month, trailing‑fill), `YYYY-MM-DD [HH:MM]`, `HH:MM` (today), named dates, `+3d` / `-2w`.
@@ -244,8 +244,8 @@ calman rc.report.next.columns=id,date,summary rc.report.next.labels=ID,DATE,TASK
 - **Syntax**: `calman <ID>... modify <TEXT> [ATTRS...]`
 - **Example**: `calman 1 modify new content pri:L -bar due:20260824`
 - **Bare words replace the summary** (Taskwarrior semantics). `+<tag>` adds, `-<tag>` removes.
-- **Attributes**: `summary` via bare text; `desc:`, `due:`, `priority:`/`pri:`, `status:`, `start:`, `end:`, `location:`, `repeat:`, `duration:`, `alert:`.
-- `+allday` → convert to all‑day, drops times/DTEND. Any `start:` → converts to timed (non‑allday); a date‑only `start:` makes the event all‑day (no implicit hour). No `-allday`.
+- **Attributes**: `summary` via bare text; `desc:`, `due:`, `priority:`/`pri:`, `status:`, `from:`, `to:`, `location:`, `repeat:`, `for:`, `alert:`.
+- `+allday` → convert to all‑day, drops times/DTEND. Any `from:` → converts to timed (non‑allday); a date‑only `from:` makes the event all‑day (no implicit hour). No `-allday`.
 
 #### F. `count` — Count tasks
 - **Syntax**: `calman count [FILTERS...]`

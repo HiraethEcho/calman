@@ -1,8 +1,8 @@
 //! `add` subcommand handler.
 //!
 //! Todo: `calman add <text> due:<date> ...`
-//! Event: `calman add <text> start:<date> [end:<date> | duration:<dur>] ...`
-//! Date-only `start:` forms (`20260812`, `0826`, `17`, `today`) → all-day event.
+//! Event: `calman add <text> from:<date> [to:<date> | for:<dur>] ...`
+//! Date-only `from:` forms (`20260812`, `0826`, `17`, `today`) → all-day event.
 
 use crate::args::ParsedArgs;
 use crate::cli::open_storage;
@@ -61,9 +61,9 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         task.related_to = targets.first().map(|(uid, _)| uid.clone());
     }
 
-    if let Some(start_str) = &q.start {
+    if let Some(start_str) = &q.from {
         if q.due.is_some() {
-            bail!("use either `start:` (event) or `due:` (todo), not both");
+            bail!("use either `from:` (event) or `due:` (todo), not both");
         }
         task.event = true;
         let start = parse_date_value(start_str)?;
@@ -77,11 +77,11 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
             task.dtstart = Some(local_midnight(d));
         }
 
-        let dur = q.duration.as_deref().map(parse_duration).transpose()?;
-        if q.end.is_some() && dur.is_some() {
-            bail!("use either `end:` or `duration:`, not both");
+        let dur = q.span.as_deref().map(parse_duration).transpose()?;
+        if q.to.is_some() && dur.is_some() {
+            bail!("use either `to:` or `for:`, not both");
         }
-        if let Some(end_str) = &q.end {
+        if let Some(end_str) = &q.to {
             let end = parse_date_value(end_str)?;
             task.dtend = Some(resolve_end(task.dtstart.unwrap(), task.allday, end)?);
         } else if let Some(d) = dur {
@@ -97,17 +97,17 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
             && let (Some(s), Some(e)) = (task.dtstart, task.dtend)
             && e < s
         {
-            bail!("end must be after start");
+            bail!("to must be after from");
         }
     } else {
-        if q.end.is_some() {
-            bail!("`end:` requires `start:` (use an event)");
+        if q.to.is_some() {
+            bail!("`to:` requires `from:` (use an event)");
         }
-        if q.duration.is_some() {
-            bail!("`duration:` requires `start:` (use an event)");
+        if q.span.is_some() {
+            bail!("`for:` requires `from:` (use an event)");
         }
         if q.allday {
-            bail!("`allday` requires `start:` (use an event)");
+            bail!("`allday` requires `from:` (use an event)");
         }
         if let Some(d) = &q.due {
             task.due = Some(*d);
@@ -135,7 +135,7 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
 
     let mut st = open_storage(conf, &src)?;
     st.add(task)?;
-    if q.start.is_some() {
+    if q.from.is_some() {
         println!("added event to `{single}`");
     } else {
         println!("added task to `{single}`");

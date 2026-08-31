@@ -10,7 +10,7 @@
   - `due:<date>`（当天）`due.before:` `due.by:` `due.after:`
   - `date:<date>` / `date.before:` / `date.by:` / `date.after:`（统一日期：
     todo→due，event→dtstart）
-  - `start:<date>` / `start.before:` / `start.by:` / `start.after:`（仅 VEVENT
+  - `from:<date>` / `from.before:` / `from.by:` / `from.after:`（仅 VEVENT
     dtstart，todo 不匹配）
   - todo 比 `due`，event 比 `dtstart`
   - 虚拟标签：`+OVERDUE +PENDING +COMPLETED +CANCELLED +IN-PROCESS +TAGGED
@@ -26,7 +26,7 @@
   sopww/eopww/sonm/eonm/sopm/eopm/sony/eony/sopy/eopy`
 - `MM-DD` 补当年（`08-26`、`9-30` → all-day）
 - 相对偏移：`+3d` / `-2w` / `+1m` / `+1y` / `+2h`
-- date-only `due:`/`start:` → all-day（`VALUE=DATE`，`task.allday=true`）；
+- date-only `due:`/`from:` → all-day（`VALUE=DATE`，`task.allday=true`）；
   all-day 仅由 `YYYYMMDD`/`YYYY-MM-DD` 语法表达
 - 命名边界带时刻：`sod`/`sow`/`som`/… = `[date] day_start`；
   `eod`/`eow`/`eom`/… = `[date] day_end`（默认 00:00:00 / 23:59:59）；
@@ -99,4 +99,4 @@
 3. config.default.toml 展示默认 icons
 4. 删 `report.default.toml`，并入 config.default.toml
 5. `[colorscheme.rules]` 内联表格式
-6. `modify start:<date>` → all-day，清除过期 dtend
+6. `modify from:<date>` → all-day，清除过期 dtend
