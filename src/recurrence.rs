@@ -200,14 +200,6 @@ fn normalize_friendly(input: &str) -> Result<String> {
     if s.is_empty() {
         bail!("empty recurrence");
     }
-    let up = s.to_uppercase();
-    if up.starts_with("FREQ=") {
-        return Ok(up);
-    }
-    if let Some(v) = up.strip_prefix("RRULE:") {
-        return Ok(v.to_string());
-    }
-
     let toks: Vec<String> = s
         .to_lowercase()
         .split(|c: char| c.is_whitespace() || c == ',')

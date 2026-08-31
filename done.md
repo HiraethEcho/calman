@@ -8,6 +8,10 @@
   - `type:todo` / `type:event` / `type:all`
   - `source:<name>` / `src:<name>` / `-source:<name>` / `-src:<name>`
   - `due:<date>`（当天）`due.before:` `due.by:` `due.after:`
+  - `date:<date>` / `date.before:` / `date.by:` / `date.after:`（统一日期：
+    todo→due，event→dtstart）
+  - `start:<date>` / `start.before:` / `start.by:` / `start.after:`（仅 VEVENT
+    dtstart，todo 不匹配）
   - todo 比 `due`，event 比 `dtstart`
   - 虚拟标签：`+OVERDUE +PENDING +COMPLETED +CANCELLED +IN-PROCESS +TAGGED
     +UNTAGGED +SCHEDULED +PARENT`
@@ -17,10 +21,10 @@
 ## Date
 - `T` 紧凑格式：`20260812T090000`、`0826T0930`、`T0900`、`25`（本月第 25 天）
 - ISO `YYYY-MM-DD [HH:MM]`、`HH:MM`（今天）
-- 命名日期：`today/tomorrow/yesterday/sod/eod/sow/eow/soww/eoww/som/eom/soq/
-  eoq/soy/eoy/sond/eond/sonw/eonw/sonww/eonww/sopw/eopw/sopww/eopww/sonm/
-  eonm/sopm/eopm/sony/eony/sopy/eopy`
-- `eoww` 可由 `[date] workweek_end` 配置（默认周五 17:00）
+- 命名日期：`today/tomorrow/yesterday/sod/eod/sopd/eopd/sow/eow/soww/eoww/
+  som/eom/soq/eoq/soy/eoy/sond/eond/sonw/eonw/sonww/eonww/sopw/eopw/
+  sopww/eopww/sonm/eonm/sopm/eopm/sony/eony/sopy/eopy`
+- `MM-DD` 补当年（`08-26`、`9-30` → all-day）
 - 相对偏移：`+3d` / `-2w` / `+1m` / `+1y` / `+2h`
 - date-only `due:`/`start:` → all-day（`VALUE=DATE`，`task.allday=true`）；
   all-day 仅由 `YYYYMMDD`/`YYYY-MM-DD` 语法表达
@@ -41,7 +45,9 @@
   `done` master → `cancelled`
 - `recur-expand`（默认）：展开 occurrence，纯数字 ID，`[defaults]
   recur_expand_count`（默认 1 = 最近一个）
-- 单次例外（iOS 兼容）：`done/delete` → `EXDATE`；`modify` → 同 UID
+- 单次例外（iOS 兼容）：`done` occurrence → Completed override 记录；
+  `delete` occurrence → `EXDATE`；`modify` occurrence → 同 UID
+  `RECURRENCE-ID` override
   `RECURRENCE-ID` override；寻址：纯 ID / `id.n` / `on:<date>`
 - `recur`/`recurrence` 报告列显示 `P7D` 式周期
 
@@ -73,8 +79,7 @@
   （注解样例）；`include` 合并
 - `[defaults]`（write_source / default_report / recur_expand_count）
 - `[contexts]` cli/sync/tui
-- `[date]` workweek_end / default_event_duration / due_date_overdue_today /
-  timezone
+- `[date]` day_start / day_end / default_event_duration / timezone
 - `[tui]`（Phase-3 预留）、`[icons]`、`[colorscheme]`、`[report.*]`
 - 删除 dead：`[locale]`、`[date] week_start`、`default_start_time`、
   `[ui]`、`report.default.toml`、theme.default.toml

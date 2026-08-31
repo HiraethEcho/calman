@@ -129,15 +129,18 @@ sequential IDs (Taskwarrior-style), and `id.n` / `on:<date>` remain valid
 aliases:
 
 ```
-calman done 5                     # skip the 5th row (an expanded occurrence) → EXDATE
-calman done 5.2                  # skip the 2nd upcoming occurrence of series 5 → EXDATE
-calman done 5 on:2026-09-02      # skip the occurrence starting that day → EXDATE
+calman done 5                     # complete the 5th row (an expanded occurrence) → Completed override record
+calman done 5.2                  # complete the 2nd upcoming occurrence of series 5
+calman done 5 on:2026-09-02      # complete the occurrence starting that day
+calman delete 5.2                # delete one occurrence → EXDATE (skip that instance)
 calman modify 5.1 summary:x      # override 1st occurrence → RECURRENCE-ID sibling
 calman modify 5 on:2026-09-02 summary:x
 ```
 
-- `done`/`delete` on an occurrence appends its original `DTSTART` to the
-  master's `EXDATE`s — iOS Calendar hides that instance.
+- `done` on an occurrence writes a **Completed** `RECURRENCE-ID` override
+  sibling: the instance stays visible under `+COMPLETED`, the series continues.
+- `delete` on an occurrence appends its original `DTSTART` to the master's
+  `EXDATE`s — iOS Calendar hides that instance.
 - `modify` on an occurrence stores a new sibling component with the **same
   `UID`** as the master plus `RECURRENCE-ID` = the occurrence's original
   `DTSTART` — iOS Calendar shows the overridden fields for that instance.

@@ -101,7 +101,7 @@ plain sequential ID (`[defaults] recur_expand_count = 1`; `0` = all future);
 address one via its plain ID, `on:<date>`, or `<id>.<n>`:
 
 ```sh
-calman done 5.2                 # skip occurrence → EXDATE
+calman done 5.2                 # complete one occurrence → Completed override record
 calman modify 5.1 summary:x     # override occurrence → RECURRENCE-ID sibling
 ```
 

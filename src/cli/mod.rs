@@ -57,6 +57,8 @@ COMMON OPTIONS (add / modify)
   rel:<id>          parent relation (RELATED-TO)
   recur:<rule>      recurrence (alias `repeat:`)
   location:<text> alert:<lead> desc:<text>
+  wait:<date|dur> hide until <expr> relative to due/start (e.g. wait:+1d,
+                    wait:sopd; hidden while `date + wait > now`, +WAITING shows)
   on:<date>         target one occurrence of a recurring series (needs `recur-expand`)
   <id>.<n>          nth upcoming occurrence (e.g. `done 5.2`, `modify 5.1 summary:x`)
                     expanded occurrences also get plain sequential IDs (`done 5` works)
@@ -72,7 +74,8 @@ RECURRENCE (recur: / repeat:)  → standard RFC 5545 RRULE
        → FREQ=WEEKLY;BYDAY=TU,FR;COUNT=14
   series model     : master = status:recurring, virtual tag +PARENT
                      hidden from ls/list/next by default (show: `+PARENT`)
-  occurrences      : done <id> on:<date> → EXDATE (skip one)
+  occurrences      : done <id> on:<date> → Completed override record
+                     delete <id> on:<date> → EXDATE (skip one)
                      modify <id>.<n> … → RECURRENCE-ID override (same UID)
                      expanded rows carry plain IDs; `done 5` targets one occurrence
 
@@ -267,12 +270,12 @@ fn expand_occurrences(rows: &mut Vec<Row>, conf: &Config) {
         for occ in occs {
             let override_task = ovs.and_then(|m| m.get(&occ.occurrence_start)).cloned();
             let mut t = override_task.clone().unwrap_or_else(|| occ.master.clone());
-            // A virtual occurrence from the template is a single active instance;
-            // a stored override keeps its own status (e.g. completed).
-            // Mark it with the master's uid so `is_parent()`/`+PARENT` never
-            // match a virtual occurrence row.
-            t.parent_uid = Some(r.task.uid.clone());
+            // Virtual occurrences get marked with the master's uid so
+            // `is_parent()`/`+PARENT` never match them; stored overrides
+            // already carry it. A virtual occurrence from the template is a
+            // single active instance; a stored override keeps its own status.
             if override_task.is_none() {
+                t.parent_uid = Some(r.task.uid.clone());
                 t.status = TaskStatus::Pending;
             }
             if t.is_event() {
@@ -295,11 +298,6 @@ fn expand_occurrences(rows: &mut Vec<Row>, conf: &Config) {
     }
     rows.extend(extra);
 
-    // Two-segment ID ordering:
-    //  1) active todos + future/today events — by created_at ASC
-    //  2) completed/cancelled todos + past events — by created_at DESC
-    // Occurrence rows carry their own date as created_at (set above), so a
-    // recurring series' future instances sit in the first segment.
     // Two-segment ID ordering:
     //  1) not-done todos + events starting today-or-later — created ASC
     //  2) done todos + events starting before today — created DESC
@@ -413,59 +411,47 @@ pub fn resolve_targets_occ(
             let row = rows
                 .get(n.checked_sub(1).unwrap_or(usize::MAX))
                 .ok_or_else(|| anyhow::anyhow!("no task with ID `{id}`"))?;
-            if row.occ.is_some() {
-                // A virtual occurrence row: target that single occurrence.
-                let occ = row
-                    .task
-                    .dtstart
-                    .or(row.task.due)
-                    .ok_or_else(|| anyhow::anyhow!("occurrence `{id}` has no date"))?;
-                out.push(OccurrenceTarget {
-                    uid: row.task.uid.clone(),
-                    source: row.source.clone(),
-                    occ_date: Some(occ),
-                });
-            } else {
-                let occ = match &occ_date {
-                    Some(d) => Some(resolve_occurrence_date(&row.task, *d)?),
-                    None => None,
-                };
-                out.push(OccurrenceTarget {
-                    uid: row.task.uid.clone(),
-                    source: row.source.clone(),
-                    occ_date: occ,
-                });
-            }
+            out.push(target_from_row(row, id, occ_date)?);
         } else {
             let found = rows
                 .iter()
                 .find(|r| r.task.uid == *id)
                 .ok_or_else(|| anyhow::anyhow!("no task with UID `{id}`"))?;
-            if found.occ.is_some() {
-                let occ = found
-                    .task
-                    .dtstart
-                    .or(found.task.due)
-                    .ok_or_else(|| anyhow::anyhow!("occurrence `{id}` has no date"))?;
-                out.push(OccurrenceTarget {
-                    uid: found.task.uid.clone(),
-                    source: found.source.clone(),
-                    occ_date: Some(occ),
-                });
-            } else {
-                let occ = match &occ_date {
-                    Some(d) => Some(resolve_occurrence_date(&found.task, *d)?),
-                    None => None,
-                };
-                out.push(OccurrenceTarget {
-                    uid: found.task.uid.clone(),
-                    source: found.source.clone(),
-                    occ_date: occ,
-                });
-            }
+            out.push(target_from_row(found, id, occ_date)?);
         }
     }
     Ok(out)
+}
+
+/// Build an `OccurrenceTarget` for a real or virtual row; `on:<date>`
+/// resolves a series occurrence by local day when the row is a master.
+fn target_from_row(
+    row: &Row,
+    id: &str,
+    occ_date: Option<DateTime<Utc>>,
+) -> Result<OccurrenceTarget> {
+    if row.occ.is_some() {
+        // A virtual occurrence row: target that single occurrence.
+        let occ = row
+            .task
+            .dtstart
+            .or(row.task.due)
+            .ok_or_else(|| anyhow::anyhow!("occurrence `{id}` has no date"))?;
+        return Ok(OccurrenceTarget {
+            uid: row.task.uid.clone(),
+            source: row.source.clone(),
+            occ_date: Some(occ),
+        });
+    }
+    let occ = match occ_date {
+        Some(d) => Some(resolve_occurrence_date(&row.task, d)?),
+        None => None,
+    };
+    Ok(OccurrenceTarget {
+        uid: row.task.uid.clone(),
+        source: row.source.clone(),
+        occ_date: occ,
+    })
 }
 
 /// Resolve the nth upcoming occurrence (1-based) of a recurring parent.

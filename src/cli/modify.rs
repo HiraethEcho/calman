@@ -86,6 +86,28 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
         None => None,
     };
 
+    let upd = Upd {
+        text: q.text.clone(),
+        priority: q.priority,
+        due: q.due,
+        due_allday: q.due_allday,
+        status: q.status,
+        tags: q.tags.clone(),
+        anti_tags: q.anti_tags.clone(),
+        location: q.location.clone(),
+        repeat: q.repeat.clone(),
+        description: q.description.clone(),
+        allday: q.allday,
+        start,
+        start_allday,
+        end,
+        duration: dur,
+        alert,
+        related: related.clone(),
+        default_duration,
+        wait: q.wait.clone(),
+    };
+
     for tgt in resolve_targets_occ(conf, override_, &q.ids, q.occ_date)? {
         let src = resolve_source(conf, &tgt.source)?;
         let mut st = open_storage(conf, &src)?;
@@ -103,58 +125,10 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
             }
             let mut ov =
                 crate::cli::override_for_occurrence(&master, occ, TaskStatus::Pending);
-            apply(
-                &mut ov,
-                &Upd {
-                    text: q.text.clone(),
-                    priority: q.priority,
-                    due: q.due,
-                    due_allday: q.due_allday,
-                    status: q.status,
-                    tags: q.tags.clone(),
-                    anti_tags: q.anti_tags.clone(),
-                    location: q.location.clone(),
-                    repeat: q.repeat.clone(),
-                    description: q.description.clone(),
-                    allday: q.allday,
-                    start,
-                    start_allday,
-                    end,
-                    duration: dur,
-                    alert,
-                    related: related.clone(),
-                    default_duration,
-                    wait: q.wait.clone(),
-                },
-            )?;
+            apply(&mut ov, &upd)?;
             st.add(ov)?;
         } else {
-            st.update(&tgt.uid, |t| {
-                apply(
-                    t,
-                    &Upd {
-                        text: q.text.clone(),
-                        priority: q.priority,
-                        due: q.due,
-                        due_allday: q.due_allday,
-                        status: q.status,
-                        tags: q.tags.clone(),
-                        anti_tags: q.anti_tags.clone(),
-                        location: q.location.clone(),
-                        repeat: q.repeat.clone(),
-                        description: q.description.clone(),
-                        allday: q.allday,
-                        start,
-                        start_allday,
-                        end,
-                        duration: dur,
-                        alert,
-                        related: related.clone(),
-                        default_duration,
-                        wait: q.wait.clone(),
-                    },
-                )
-            })?
+            st.update(&tgt.uid, |t| apply(t, &upd))?
             .ok_or_else(|| anyhow::anyhow!("task `{}` disappeared", tgt.uid))?;
         }
     }

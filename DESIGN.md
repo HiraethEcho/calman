@@ -193,7 +193,8 @@ calman modify <TEXT> [ATTRS...] # bare text replaces the summary
       ⇒ `cancelled`; `modify`/`delete` target the master record.
     - Optional `recur-expand` feature: `list`/`next` expand masters into virtual
       occurrence rows (plain sequential IDs); occurrences addressed via
-      `on:<date>` or `<id>.<n>`. `done`/`delete` on an occurrence ⇒ `EXDATE`;
+      `on:<date>` or `<id>.<n>`. `done` on an occurrence ⇒ Completed
+      `RECURRENCE-ID` override sibling; `delete` on an occurrence ⇒ `EXDATE`;
       `modify` on an occurrence ⇒ sibling component with same `UID` +
       `RECURRENCE-ID` (iOS Calendar compatible).
     - No `end:`/`duration:` → `[date] default_event_duration`; empty (default)

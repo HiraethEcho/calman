@@ -74,8 +74,6 @@ pub struct ParsedArgs {
     pub alert: Option<String>,
 }
 
-impl ParsedArgs {}
-
 /// Free-text attribute whose value may arrive on following tokens
 /// (e.g. `desc: "some more information"`).
 #[derive(Clone, Copy)]
@@ -194,12 +192,9 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
             .or_else(|| lower.strip_prefix("pri:"))
         {
             q.priority = Some(parse_priority(rest)?);
-        } else if tok.get(..7).is_some_and(|s| s.eq_ignore_ascii_case("source:")) {
+        } else if let Some(rest) = lower.strip_prefix("source:").or_else(|| lower.strip_prefix("src:")) {
             q.sources
-                .extend(tok[7..].split(',').map(|s| s.trim().to_string()));
-        } else if tok.get(..4).is_some_and(|s| s.eq_ignore_ascii_case("src:")) {
-            q.sources
-                .extend(tok[4..].split(',').map(|s| s.trim().to_string()));
+                .extend(rest.split(',').map(|s| s.trim().to_string()));
         } else if let Some(rest) = lower.strip_prefix("due:") {
             let dv = parse_date_value(rest)?;
             let dtv = match dv {
@@ -280,9 +275,12 @@ pub fn parse(args: &[String]) -> Result<ParsedArgs> {
 /// Filter/virtual tokens that `add`/`modify` must not treat as literal tags.
 /// They are still recorded in `filter_tokens` for `list`/`count`.
 fn is_filter_only_plus(name: &str) -> bool {
-    let l = name.to_ascii_lowercase();
+    is_virtual_tag(&name.to_ascii_lowercase())
+}
+
+fn is_virtual_tag(l: &str) -> bool {
     matches!(
-        l.as_str(),
+        l,
         "overdue"
             | "pending"
             | "completed"
@@ -308,29 +306,8 @@ fn is_filter_only_plus(name: &str) -> bool {
 
 fn is_filter_only_minus(name: &str) -> bool {
     let l = name.to_ascii_lowercase();
-    matches!(
-        l.as_str(),
-        "overdue"
-            | "pending"
-            | "completed"
-            | "done"
-            | "active"
-            | "cancelled"
-            | "canceled"
-            | "in-progress"
-            | "inprogress"
-            | "in-process"
-            | "inprocess"
-            | "started"
-            | "tagged"
-            | "untagged"
-            | "scheduled"
-            | "todo"
-            | "event"
-            | "parent"
-            | "recurring"
-            | "waiting"
-    ) || l.starts_with("status:")
+    is_virtual_tag(&l)
+        || l.starts_with("status:")
         || l.starts_with("source:")
         || l.starts_with("type:")
         || l.starts_with("priority:")

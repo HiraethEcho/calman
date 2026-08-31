@@ -441,7 +441,6 @@ fn fmt_date(dt: &DateTime<Local>, spec: &str) -> String {
     match spec {
         "iso" => dt.format("%Y-%m-%d").to_string(),
         "date" => dt.format("%m/%d").to_string(),
-        s if s.contains('%') => dt.format(s).to_string(),
         s => dt.format(s).to_string(),
     }
 }

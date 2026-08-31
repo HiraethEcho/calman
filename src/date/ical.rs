@@ -28,7 +28,7 @@ pub enum DateValue {
 /// Date-only forms land at local midnight (todo `due` semantics).
 pub fn parse_datetime(input: &str) -> Result<DateTime<Utc>> {
     match parse_date_value(input)? {
-        DateValue::Date(d) => Ok(local_to_utc(d.and_hms_opt(0, 0, 0).unwrap())),
+        DateValue::Date(d) => Ok(local_midnight(d)),
         DateValue::Time(dt) => Ok(dt),
     }
 }

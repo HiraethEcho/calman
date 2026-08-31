@@ -33,8 +33,15 @@ impl IcsStorage {
                 continue;
             }
             if let Ok(content) = fs::read_to_string(&path)
-                && let Ok(task) = parse_ics(&content)
+                && let Ok(mut task) = parse_ics(&content)
             {
+                // Storage key = filename (one task per file). The ICS UID
+                // inside stays the master's for overrides (RECURRENCE-ID
+                // semantics); using the filename avoids master/override
+                // UID collisions in `update`/`remove` lookups.
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    task.uid = stem.to_string();
+                }
                 tasks.push(task);
             }
         }
@@ -86,6 +93,16 @@ impl Storage for IcsStorage {
             fs::remove_file(&path)?;
         }
         Ok(Some(removed))
+    }
+}
+
+/// Render a date property (DUE/DTSTART/DTEND/EXDATE/RECURRENCE-ID) in its
+/// all-day (`;VALUE=DATE`) or timed (`;TZID=`) form.
+fn ics_date_prop(name: &str, d: DateTime<Utc>, allday: bool, tz: Tz) -> String {
+    if allday {
+        format!("{name};VALUE=DATE:{}", d.with_timezone(&Local).format("%Y%m%d"))
+    } else {
+        format!("{name};TZID={}:{}", tz.name(), dt_local(d, tz))
     }
 }
 
@@ -155,14 +172,7 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
     props.push(format!("CREATED:{}", dt(task.created_at)));
     props.push(format!("LAST-MODIFIED:{}", dt(task.updated_at)));
     if let Some(d) = task.due {
-        if task.allday {
-            props.push(format!(
-                "DUE;VALUE=DATE:{}",
-                d.with_timezone(&Local).format("%Y%m%d")
-            ));
-        } else {
-            props.push(format!("DUE;TZID={}:{}", tz.name(), dt_local(d, tz)));
-        }
+        props.push(ics_date_prop("DUE", d, task.allday, tz));
     }
     if let Some(p) = task.percent_complete {
         props.push(format!("PERCENT-COMPLETE:{p}"));
@@ -174,59 +184,23 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
     if task.event
         && let Some(d) = task.dtstart
     {
-        if task.allday {
-            props.push(format!(
-                "DTSTART;VALUE=DATE:{}",
-                d.with_timezone(&Local).format("%Y%m%d")
-            ));
-        } else {
-            props.push(format!("DTSTART;TZID={}:{}", tz.name(), dt_local(d, tz)));
-        }
+        props.push(ics_date_prop("DTSTART", d, task.allday, tz));
     }
     if task.event
         && let Some(d) = task.dtend
     {
-        if task.allday {
-            props.push(format!(
-                "DTEND;VALUE=DATE:{}",
-                d.with_timezone(&Local).format("%Y%m%d")
-            ));
-        } else {
-            props.push(format!("DTEND;TZID={}:{}", tz.name(), dt_local(d, tz)));
-        }
+        props.push(ics_date_prop("DTEND", d, task.allday, tz));
     }
     if let Some(r) = &task.rrule {
         props.push(format!("RRULE:{r}"));
     }
     // Emit EXDATE for each excluded occurrence.
     for ex in &task.exdates {
-        if task.allday {
-            props.push(format!(
-                "EXDATE;VALUE=DATE:{}",
-                ex.with_timezone(&Local).format("%Y%m%d")
-            ));
-        } else {
-            props.push(format!(
-                "EXDATE;TZID={}:{}",
-                tz.name(),
-                dt_local(*ex, tz)
-            ));
-        }
+        props.push(ics_date_prop("EXDATE", *ex, task.allday, tz));
     }
     // Emit RECURRENCE-ID for override instances.
     if let Some(rid) = task.recurrence_id {
-        if task.allday {
-            props.push(format!(
-                "RECURRENCE-ID;VALUE=DATE:{}",
-                rid.with_timezone(&Local).format("%Y%m%d")
-            ));
-        } else {
-            props.push(format!(
-                "RECURRENCE-ID;TZID={}:{}",
-                tz.name(),
-                dt_local(rid, tz)
-            ));
-        }
+        props.push(ics_date_prop("RECURRENCE-ID", rid, task.allday, tz));
     }
     if let Some(l) = &task.location {
         props.push(format!("LOCATION:{}", escape_text(l)));
@@ -788,6 +762,54 @@ mod tests {
         assert!(out.contains("UID:series-1"));
         assert!(out.contains("RECURRENCE-ID;TZID=Asia/Shanghai:"));
         assert!(!out.contains("RRULE:"));
+    }
+
+    #[test]
+    fn master_and_override_coexist_independently_updatable() {
+        // Regression: override files carry the master's ICS UID (RECURRENCE-ID
+        // semantics); the storage key must be the filename, otherwise
+        // update/remove hit the wrong task.
+        let dir = tempdir().unwrap();
+        let mut master = Task::new("work", "series");
+        master.event = true;
+        master.status = TaskStatus::Recurring;
+        master.dtstart = Some(chrono::Utc::now());
+        master.rrule = Some("FREQ=WEEKLY".to_string());
+        master.summary = "master-summary".to_string();
+        let master_uid = master.uid.clone();
+
+        let mut st = IcsStorage::open(dir.path(), Tz::UTC).unwrap();
+        st.add(master).unwrap();
+        let occ = chrono::Utc::now() + chrono::Duration::days(7);
+        let mut ov = crate::cli::override_for_occurrence(
+            st.list().iter().find(|t| t.uid == master_uid).unwrap(),
+            occ,
+            crate::model::TaskStatus::Completed,
+        );
+        ov.summary = "override-summary".to_string();
+        st.add(ov).unwrap();
+        drop(st);
+
+        // Reload: both tasks present, distinct storage keys, master intact.
+        let st = IcsStorage::open(dir.path(), Tz::UTC).unwrap();
+        assert_eq!(st.list().len(), 2);
+        let ov_in = st
+            .list()
+            .iter()
+            .find(|t| t.summary == "override-summary")
+            .unwrap();
+        assert_ne!(ov_in.uid, master_uid);
+        assert_eq!(ov_in.parent_uid.as_deref(), Some(master_uid.as_str()));
+
+        // Updating the master must not touch the override.
+        let mut st = IcsStorage::open(dir.path(), Tz::UTC).unwrap();
+        st.update(&master_uid, |t| {
+            t.summary = "master-v2".to_string();
+            Ok(())
+        })
+        .unwrap();
+        assert!(st.list().iter().any(|t| t.summary == "master-v2"));
+        assert!(st.list().iter().any(|t| t.summary == "override-summary"));
     }
 
     #[test]
