@@ -73,14 +73,12 @@ pub enum Expr {
 }
 
 impl Expr {
-    /// Matches with the default overdue policy (all-day due overdue only after its day).
-    #[allow(dead_code)] // convenience wrapper; production uses `matches_with`
+    /// Test convenience; production uses `matches_with`.
+    #[cfg(test)]
     pub fn matches(&self, t: &Task) -> bool {
         self.matches_with(t)
     }
 
-    /// Overdue policy is fixed: a date-only `due` counts overdue the day
-    /// after it passes.
     pub fn matches_with(&self, t: &Task) -> bool {
         match self {
             Expr::Atom(f) => f.matches_with(t),
@@ -101,11 +99,6 @@ pub fn task_date(t: &Task) -> Option<DateTime<Utc>> {
 }
 
 impl Filter {
-    #[allow(dead_code)] // convenience wrapper; production uses `matches_with`
-    pub fn matches(&self, t: &Task) -> bool {
-        self.matches_with(t)
-    }
-
     pub fn matches_with(&self, t: &Task) -> bool {
         if let Some(s) = self.status
             && t.status != s

@@ -23,7 +23,8 @@ Taskwarrior-style CLI and a planned TUI. Data lives locally as `jsonl` or
 - `SPEC.md` — product spec & decisions
 - `DESIGN.md` — detailed functional design (man-page style)
 - `PLAN.md` — phased roadmap
-- `feature.md` — feature backlog & design notes (scratch file; may lag the code)
+- `todo.md` — 未完成需求
+- `done.md` — 已完成需求对照
 - `AGENTS.md` — developer guide
 
 > Tip: run `calman help` (or `calman filters`) any time to print a compact

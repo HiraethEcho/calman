@@ -353,9 +353,9 @@ fn cell(conf: &Config, r: &Row, c: &Column) -> String {
         "summary" => maybe_truncate(t.summary.as_str(), c),
         "desc" => maybe_truncate(t.description.as_deref().unwrap_or(""), c),
         "tags" => t.tags.join(","),
-        "date" => date_str(conf, r, c),
+        "date" => date_str(r, c),
         // Backwards-compatible alias: `due` == `date`.
-        "due" => date_str(conf, r, c),
+        "due" => date_str(r, c),
         "pri" => pri_str(t.priority),
         "source" => t.source.clone(),
         "recur" | "recurrence" => t
@@ -390,7 +390,7 @@ fn maybe_truncate(s: &str, c: &Column) -> String {
     }
 }
 
-fn date_str(_conf: &Config, r: &Row, c: &Column) -> String {
+fn date_str(r: &Row, c: &Column) -> String {
     let dt = crate::filter::task_date(&r.task);
     let Some(dt) = dt else {
         return String::new();

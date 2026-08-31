@@ -22,8 +22,13 @@
   eonm/sopm/eopm/sony/eony/sopy/eopy`
 - `eoww` 可由 `[date] workweek_end` 配置（默认周五 17:00）
 - 相对偏移：`+3d` / `-2w` / `+1m` / `+1y` / `+2h`
-- date-only `due:`/`start:` → all-day（`VALUE=DATE`，`task.allday=true`）
-- overdue 规则：`[date] due_date_overdue_today`（false=次日逾期，true=当天）
+- date-only `due:`/`start:` → all-day（`VALUE=DATE`，`task.allday=true`）；
+  all-day 仅由 `YYYYMMDD`/`YYYY-MM-DD` 语法表达
+- 命名边界带时刻：`sod`/`sow`/`som`/… = `[date] day_start`；
+  `eod`/`eow`/`eom`/… = `[date] day_end`（默认 00:00:00 / 23:59:59）；
+  `today`/`tomorrow`/`yesterday` 仍 date-only
+- overdue 规则固定：all-day due 次日才算 overdue（无配置开关）
+- `[date] default_event_duration` 为空 → 瞬间日程（仅 DTSTART，无 DTEND）
 - ISO 8601 时长：`alert:PT15M`、`duration:P2W`、`recur:P7D`
 
 ## Recurrence
