@@ -85,7 +85,7 @@ calman add "pay" due:eom recur:FREQ=MONTHLY;UNTIL=20261231
 - frequency: `daily weekly monthly yearly`
 - interval: `every 7d` / `7d` / `every 2 weeks`
 - weekdays: `every tuesday and friday` / `every weekend`
-- end: `for 5 times` / `for 7 weeks` / `count:5` / `until:20260925` / `until:eoy` / `until:eom`
+- series end: `for 5 times` / `for 7 weeks` / `count:5` / `until:20260925` / `until:eoy` / `until:eom`
 - raw passthrough: `recur:FREQ=WEEKLY;BYDAY=TU,FR`
 - ISO 8601 period: `recur:P7D` → `FREQ=DAILY;INTERVAL=7` (also `P2W`/`P1M`/`P1Y`)
 - natural language (default build): `recur:"every tuesday"`

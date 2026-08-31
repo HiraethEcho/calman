@@ -36,7 +36,7 @@ tui  = ["work", "personal"]          # TUI 启动时显示; 空 = 全部
 [date]
 day_start = "00:00:00"               # sod/sow/som 等日界起点 (HH:MM:SS)
 day_end = "23:59:59"                 # eod/eow/eom 等日界终点 (HH:MM:SS)
-default_event_duration = ""           # event 无 end:/duration: 时的默认时长; 空=瞬间日程(仅 DTSTART)
+default_event_duration = ""           # event 无 to:/for: 时的默认时长; 空=瞬间日程(仅 DTSTART)
 # 例: default_event_duration = "1h"
 # IANA 时区 (序列化 ICS TZID 用); 省略 → 自动探测 $TZ / /etc/localtime
 # timezone = "Asia/Shanghai"

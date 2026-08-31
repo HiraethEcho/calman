@@ -69,7 +69,7 @@
 - [x] Modular config: `include` merge in `config.rs` + `config.example.toml` / `report.example.toml` / `colorscheme.example.toml`.
 - [x] Config two tiers: `*.default.toml` (minimal baseline) + `*.example.toml` (annotated samples).
 - [x] Recurrence: `recur:`/`repeat:` → standard RFC 5545 `RRULE` (`recurrence.rs`); raw `FREQ=` passthrough + friendly grammar.
-- [x] Date-only `due`/`start` → all-day (`VALUE=DATE`); `[date] due_date_overdue_today` toggle.
+- [x] Date-only `due`/`from` → all-day (`VALUE=DATE`); overdue policy fixed (day-after), `due_date_overdue_today` removed.
 
 ### 2.5 fix.md Cleanup (config ergonomics)
 - [x] Drop `[date] default_start_time`: remove field (config.rs `DateConfig` + default fn + `Config::default`), remove from `config.default.toml`. `modify start:<date>` (date-only) now becomes an all-day event, consistent with `add` (update `modify.rs` + header doc).
@@ -163,8 +163,8 @@ Minimal build: `--no-default-features --features storage-ics,date-ical`.
 - [x] `recur-expand` moved into **default features**; occurrence rows get plain sequential IDs (Taskwarrior-style), `id.n`/`on:<date>` kept as aliases.
 - [x] `recur_expand_count` config (`[defaults]`, default 1 = nearest occurrence only).
 - [x] `recur`/`recurrence` report column renders RRULE as ISO period (`P7D`/`P2W`/`P1M`/`P1Y`).
-- [x] ISO 8601 durations/periods: `recur:P7D`, `alert:PT15M`, `duration:P2W` (works without `date-natural`).
-- [x] `workweek_end` config implemented (drives `eoww`); removed dead `week_start`/`[locale]` config.
+- [x] ISO 8601 durations/periods: `recur:P7D`, `alert:PT15M`, `for:P2W` (works without `date-natural`).
+- [x] `eoww` uses `day_end`; `workweek_end` config was removed (with dead `week_start`/`[locale]`).
 - [x] `src:` alias for `source:` (CLI + filter); `desc:` capture fixed with `src:`; multiline `desc` single-line render (`␤`) + display-width truncation (`unicode-width`); CJK-safe arg prefix checks.
 - [x] Composite `ics-dir` sources (`remote/sorge`) fixed for `done`/`delete`/`modify` via `cli::resolve_source`.
 

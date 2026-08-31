@@ -46,9 +46,10 @@ columns = [
   { field = "summary", label = "SUMMARY" },
 ]
 
-# 可用字段 (field): id status summary desc tags date due pri type source recur/recurrence
-#   summary = CalDAV SUMMARY; desc = DESCRIPTION; date/due 列对 event 显示 dtstart
-# 可用格式 (format): relative | countdown | iso | truncate; date/due 另有
+# 可用字段 (field): id status summary desc tags date pri type source recur/recurrence
+#   date/due/start/from 为同一列 (event 显示 dtstart, todo 显示 due)
+#   summary = CalDAV SUMMARY; desc = DESCRIPTION
+# 可用格式 (format): relative | countdown | iso | truncate; date 另有
 #   event_format / todo_format 分别定制 event 与 todo 的显示
 #   (默认: event = MM/DD 纯日期, todo = relative)
 # truncate 配合 width 使用 (超宽截断加 …)

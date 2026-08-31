@@ -32,7 +32,7 @@ tui = []
 day_start = "00:00:00"
 # Day end for named boundaries (`eod`/`eow`/`eom`/…).
 day_end = "23:59:59"
-# Fallback event length when neither `end:` nor `duration:` is given.
+# Fallback event length when neither `to:` nor `for:` is given.
 # Empty (default) ⇒ instant event (DTSTART only, no DTEND).
 default_event_duration = ""
 # IANA timezone used when serialising timed `DTSTART`/`DTEND`/`DUE` to ICS with a

@@ -1,6 +1,6 @@
 # Done
 
-已完成功能清单（来自 feature.md / fix.md，截至 v0.1.0）。
+已完成功能清单（持续更新；feature.md/fix.md 已归档删除）。
 
 ## CLI / Filter
 - 共享 filter 语法（CLI + report filter）：
@@ -33,7 +33,7 @@
   `today`/`tomorrow`/`yesterday` 仍 date-only
 - overdue 规则固定：all-day due 次日才算 overdue（无配置开关）
 - `[date] default_event_duration` 为空 → 瞬间日程（仅 DTSTART，无 DTEND）
-- ISO 8601 时长：`alert:PT15M`、`duration:P2W`、`recur:P7D`
+- ISO 8601 时长：`alert:PT15M`、`for:P2W`、`recur:P7D`
 
 ## Recurrence
 - `recur:`（alias `repeat:`）→ RFC 5545 `RRULE`
