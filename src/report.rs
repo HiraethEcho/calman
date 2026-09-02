@@ -678,9 +678,9 @@ fn rule_matches(key: &str, parents: &HashSet<&str>, r: &Row) -> bool {
         "blocking" => t.related_to.is_some(),
         "scheduled" => t.is_event(),
         "tagged" => !t.tags.is_empty(),
-        "priority.L" => t.priority == Some(1),
+        "priority.L" => t.priority == Some(9),
         "priority.M" => t.priority == Some(5),
-        "priority.H" => t.priority == Some(9),
+        "priority.H" => t.priority == Some(1),
         _ => false,
     }
 }
