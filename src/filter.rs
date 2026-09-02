@@ -170,6 +170,26 @@ impl Filter {
     }
 }
 
+/// True when the task's date has passed and it is not done (recurring
+/// templates excluded — they are not real instances).
+pub fn is_overdue(t: &Task) -> bool {
+    let Some(d) = task_date(t) else {
+        return false;
+    };
+    if !t.status.is_active() {
+        return false;
+    }
+    if t.allday {
+        // Date-only (all-day) task: compare local calendar days.
+        // Overdue starts the day AFTER the due day.
+        let due_day = d.with_timezone(&Local).date_naive();
+        let today = Local::now().date_naive();
+        today > due_day
+    } else {
+        d < Utc::now()
+    }
+}
+
 fn flag_matches(f: Flag, t: &Task) -> bool {
     match f {
         Flag::Pending => t.status.is_active(),
@@ -185,23 +205,7 @@ fn flag_matches(f: Flag, t: &Task) -> bool {
             .wait
             .zip(task_date(t))
             .is_some_and(|(w, d)| d + chrono::Duration::seconds(w) > Utc::now()),
-        Flag::Overdue => {
-            let Some(d) = task_date(t) else {
-                return false;
-            };
-            if !t.status.is_active() {
-                return false;
-            }
-            if t.allday {
-                // Date-only (all-day) task: compare local calendar days.
-                // Overdue starts the day AFTER the due day.
-                let due_day = d.with_timezone(&Local).date_naive();
-                let today = Local::now().date_naive();
-                today > due_day
-            } else {
-                d < Utc::now()
-            }
-        }
+        Flag::Overdue => is_overdue(t),
     }
 }
 
@@ -611,6 +615,25 @@ mod tests {
         u.status = TaskStatus::InProgress;
         assert!(s.matches(&u));
         assert!(!s.matches(&todo(0)));
+    }
+
+    #[test]
+    fn overdue_wait_stays_waiting() {
+        use chrono::{Duration, Utc};
+        let w = parse_expr_str("+WAITING").unwrap();
+        let o = parse_expr_str("+OVERDUE").unwrap();
+        let mut t = todo(0);
+        // Overdue timed todo with a +1d wait window: overdue AND waiting.
+        t.due = Some(Utc::now() - Duration::hours(2));
+        t.wait = Some(86_400);
+        assert!(o.matches(&t));
+        assert!(w.matches(&t));
+        // A future instance with the same wait is also waiting, not overdue.
+        let mut f = todo(0);
+        f.due = Some(Utc::now() + Duration::hours(2));
+        f.wait = Some(86_400);
+        assert!(!o.matches(&f));
+        assert!(w.matches(&f));
     }
 
     #[test]

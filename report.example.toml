@@ -71,11 +71,13 @@ columns = [
 # 合并后的 STATUS 列按任务类型取表: todo → [icons.todo], event → [icons.event]
 [icons]
 [icons.todo]                         # VTODO: pending=○ in-progress=● recurring=⟳ completed=✓ cancelled=✕
+#   overdue 额外键: STATUS 列显示它 (默认 "!"), date 列显示纯日期
 pending = "○"
 in-progress = "●"
 recurring = "⟳"
 completed = "✓"
 cancelled = "✕"
+overdue = "!"
 
 [icons.event]                        # VEVENT: pending/confirmed/recurring=○, cancelled=✕ (无 completed)
 pending = ""

@@ -343,7 +343,14 @@ fn cell(conf: &Config, r: &Row, c: &Column) -> String {
         // Merged type/status: both kinds show a status glyph; the per-kind
         // global tables `[icons.todo]` / `[icons.event]` pick the glyph.
         "status" => {
-            let st = status_txt(t.status);
+            // Overdue rows show `overdue` as the status glyph (customisable
+            // via `[icons.todo].overdue` / column `icons`); the date column
+            // then just shows the plain date instead.
+            let st = if crate::filter::is_overdue(t) {
+                "overdue"
+            } else {
+                status_txt(t.status)
+            };
             let kind = if t.is_event() { "event" } else { "todo" };
             if c.icon {
                 icon(conf, kind, st, c)
@@ -417,8 +424,25 @@ fn date_str(r: &Row, c: &Column) -> String {
         return allday_date_str(c, &local);
     }
     match c.todo_format.as_deref().or(c.format.as_deref()) {
-        Some("relative") => relative(&local, &Local::now()),
-        Some("countdown") => countdown(&local, &Local::now()),
+        Some("relative") => {
+            // Any past date shows as a plain date (works for recurring master
+            // rows too, which `is_overdue` deliberately excludes); the status
+            // column carries the overdue marker for real instances.
+            let now = Local::now();
+            if local < now {
+                local.format("%m/%d").to_string()
+            } else {
+                relative(&local, &now)
+            }
+        }
+        Some("countdown") => {
+            let now = Local::now();
+            if local < now {
+                local.format("%m/%d").to_string()
+            } else {
+                countdown(&local, &now)
+            }
+        }
         Some(f) => fmt_date(&local, f),
         None => local.format("%Y-%m-%d").to_string(),
     }
@@ -432,7 +456,8 @@ fn allday_date_str(c: &Column, local: &DateTime<Local>) -> String {
     match c.todo_format.as_deref().or(c.format.as_deref()) {
         Some("relative") | Some("countdown") => {
             if days < 0 {
-                "overdue".to_string()
+                // Overdue: plain date; the status column carries the marker.
+                local.format("%m/%d").to_string()
             } else if days == 0 {
                 "today".to_string()
             } else {
@@ -546,6 +571,7 @@ fn builtin_status_icon(kind: &str, val: &str) -> Option<String> {
         "recurring" => "⟳",
         "completed" => "✓",
         "cancelled" => "✕",
+        "overdue" => "!",
         _ => return None,
     };
     Some(s.to_string())
@@ -815,6 +841,45 @@ mod tests {
         assert!(out.contains("ID"));
         assert!(out.contains("1"));
         assert!(out.contains("buy milk"));
+    }
+
+    #[test]
+    fn overdue_row_shows_date_in_date_col_and_marker_in_status() {
+        use chrono::{Duration, Utc};
+        let conf = Config::default();
+        let mut r = row(1, "missed");
+        r.task.due = Some(Utc::now() - Duration::hours(5));
+        let date_col = Column {
+            field: "date".into(),
+            label: "DATE".into(),
+            width: None,
+            format: None,
+            icon: false,
+            icons: Default::default(),
+            event_format: None,
+            todo_format: Some("relative".into()),
+        };
+        let status_col = Column {
+            field: "status".into(),
+            label: "ST".into(),
+            width: None,
+            format: None,
+            icon: false,
+            icons: Default::default(),
+            event_format: None,
+            todo_format: None,
+        };
+        let d = cell(&conf, &r, &date_col);
+        assert!(!d.contains("overdue"));
+        assert_eq!(d.len(), 5); // MM/DD
+        let s = cell(&conf, &r, &status_col);
+        assert_eq!(s, "overdue");
+        // Icon form uses the builtin marker and is overridable per column.
+        let mut icon_col = status_col.clone();
+        icon_col.icon = true;
+        assert_eq!(cell(&conf, &r, &icon_col), "!");
+        icon_col.icons.insert("overdue".into(), "⚠".into());
+        assert_eq!(cell(&conf, &r, &icon_col), "⚠");
     }
 
     #[test]

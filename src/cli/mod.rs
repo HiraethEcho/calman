@@ -273,12 +273,19 @@ fn expand_occurrences(rows: &mut Vec<Row>, conf: &Config) {
         if !r.task.is_parent() || r.task.status.is_done() {
             continue;
         }
-        let occs = expand_task(&r.task, after, before);
+        // Past occurrences are treated like ordinary items: expand the whole
+        // series from its start (not a 1-day window) so overdue instances
+        // show up. Only FUTURE occurrences are capped by
+        // `[defaults] recur_expand_count`.
+        let series_start = r.task.dtstart.or(r.task.due);
+        let occs = expand_task(
+            &r.task,
+            series_start.unwrap_or(after) - Duration::seconds(1),
+            before,
+        );
         let ovs = overrides.get(&r.task.uid);
         // Skip occurrences that already have a completed/cancelled override so
-        // the first "slots" show the next actionable instance — otherwise a
-        // finished occurrence whose time is still ahead keeps occupying the
-        // `recur_expand_count` budget.
+        // only actionable instances are shown.
         let occs: Vec<_> = occs
             .into_iter()
             .filter(|oc| match ovs.and_then(|m| m.get(&oc.occurrence_start)) {
@@ -286,14 +293,18 @@ fn expand_occurrences(rows: &mut Vec<Row>, conf: &Config) {
                 None => true,
             })
             .collect();
-        let occs: Vec<_> = if conf.defaults.recur_expand_count == 0 {
-            occs
-        } else {
-            occs
-                .into_iter()
-                .take(conf.defaults.recur_expand_count)
-                .collect()
-        };
+        let (past, future): (Vec<_>, Vec<_>) = occs
+            .into_iter()
+            .partition(|oc| oc.occurrence_start < now);
+        let limit = conf.defaults.recur_expand_count;
+        let occs: Vec<_> = past
+            .into_iter()
+            .chain(future.into_iter().take(if limit == 0 {
+                usize::MAX
+            } else {
+                limit
+            }))
+            .collect();
         for occ in occs {
             let override_task = ovs.and_then(|m| m.get(&occ.occurrence_start)).cloned();
             let mut t = override_task.clone().unwrap_or_else(|| occ.master.clone());
@@ -325,20 +336,20 @@ fn expand_occurrences(rows: &mut Vec<Row>, conf: &Config) {
     }
     rows.extend(extra);
 
-    // Two-segment ID ordering:
-    //  1) not-done todos + events starting today-or-later — created ASC
-    //  2) done todos + events starting before today — created DESC
-    // Occurrence rows carry their own date as created_at (set above), so a
-    // recurring series' future instances sit in the first segment.
+    // Two-segment ID ordering (calendar-date based, time of day irrelevant):
+    //  1) not-done todos (occurrences included) + events starting today-or-later
+    //  2) done todos + events starting before today
+    // Occurrence rows carry their own date as created_at (set above), so
+    // overdue occurrences sort into the first segment by occurrence date.
     let today = Local::now().date_naive();
     let first = |r: &Row| -> bool {
         if r.task.is_event() {
-            // Events are split by their start date (> yesterday ⇒ segment 1).
             r.task
                 .dtstart
                 .is_some_and(|d| d.with_timezone(&Local).date_naive() >= today)
         } else {
-            // Todos are split by completion only; due date is irrelevant.
+            // Todos, virtual occurrences included, are split by completion
+            // only (overdue occurrences stay in segment 1); due date irrelevant.
             !r.task.status.is_done()
         }
     };
@@ -658,6 +669,36 @@ mod tests {
 
     #[cfg(feature = "recur-expand")]
     #[test]
+    fn expansion_keeps_all_past_occurrences_and_limits_future() {
+        use crate::model::TaskStatus;
+        use chrono::{Duration, Utc};
+        let dir = tempdir().unwrap();
+        let mut st = crate::storage::jsonl::JsonlStorage::open(dir.path()).unwrap();
+        let now = Utc::now();
+        // Daily todo: two occurrences already past (30h and 6h ago), next two ahead.
+        let mut master = Task::new("work", "daily");
+        master.due = Some(now - Duration::hours(30));
+        master.rrule = Some("FREQ=DAILY".into());
+        master.status = TaskStatus::Recurring;
+        st.add(master).unwrap();
+        drop(st);
+
+        let rows =
+            load_merged_expanded(&Config::default(), &[source(dir.path(), "work")]).unwrap();
+        let occ: Vec<_> = rows.iter().filter(|r| r.occ.is_some()).collect();
+        // Past occurrences are all shown (2), future capped at 1 (@ limit=1).
+        assert_eq!(occ.len(), 3);
+        let dates: Vec<_> = occ
+            .iter()
+            .map(|r| r.task.due.unwrap().with_timezone(&Local).date_naive())
+            .collect();
+        // Oldest first: -30h, -6h, then the next future day.
+        assert!(dates[1] >= dates[0]);
+        assert!(dates[2] > dates[1]);
+    }
+
+    #[cfg(feature = "recur-expand")]
+    #[test]
     fn two_segment_id_order() {
         use crate::model::TaskStatus;
         use chrono::{Duration, Utc};
@@ -734,3 +775,4 @@ mod tests {
         assert_eq!(shown, vec![1, 3]);
     }
 }
+

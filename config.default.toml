@@ -59,6 +59,8 @@ in-progress = "●"
 recurring = "⟳"
 completed = "✓"
 cancelled = "✕"
+# overdue 行: STATUS 列显示此键 (默认 "!"); date 列改为显示纯日期
+overdue = "!"
 [icons.event]
 pending = "󰃭"
 in-progress = "●"
