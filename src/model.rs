@@ -36,9 +36,9 @@ impl TaskStatus {
 /// Map a priority token (`high`/`medium`/`low` or 0-9) to a level.
 pub fn priority_from_str(s: &str) -> Option<u8> {
     match s.to_ascii_lowercase().as_str() {
-        "high" | "h" => Some(9),
+        "high" | "h" => Some(1),
         "medium" | "m" => Some(5),
-        "low" | "l" => Some(1),
+        "low" | "l" => Some(9),
         _ => s.parse().ok(),
     }
 }

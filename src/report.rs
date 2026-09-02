@@ -480,9 +480,9 @@ fn fmt_date(dt: &DateTime<Local>, spec: &str) -> String {
 
 fn pri_str(p: Option<u8>) -> String {
     match p {
-        Some(9) => "H".into(),
+        Some(1) => "H".into(),
         Some(5) => "M".into(),
-        Some(1) => "L".into(),
+        Some(9) => "L".into(),
         Some(n) => n.to_string(),
         None => String::new(),
     }
