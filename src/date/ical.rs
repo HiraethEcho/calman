@@ -1,31 +1,36 @@
+//! iCalendar 风格紧凑日期解析（feature `date-ical`）。
 //! iCalendar-style compact date parsing (feature `date-ical`).
 //!
-//! Per DESIGN.md §6.1 and Taskwarrior named dates, plus a `T`-marked compact
-//! form (RFC 5545 `YYYYMMDDTHHMMSS` style), where `T` separates date and time:
-//! `20260828T090000` is a full date-time; `20260828` (8 digits) is an all-day
-//! `YYYYMMDD`; `<8` digits (`0823`, `25`) are treated as the trailing digits of
-//! `YYYYMMDD` with the prefix filled from today (`0823`→2026-08-23, `25`→2026-08-25);
-//! `0828T0900`/`25T` use the digits before `T` as trailing date digits and the
-//! part after `T` as `HHMMSS`; `T0900`/`T09` use today's date plus `HHMMSS`
-//! (zero-padded, `T` alone → today 00:00). Also accepted: `YYYY-MM-DD`,
-//! `YYYY-MM-DD HH:MM`, `HH:MM` (today), `now`, named day boundaries, and
-//! relative `+3d`/`-2w`/`+1h`. All-local input is resolved to UTC via
-//! `local_to_utc` (DST-safe, CalDAV-safe).
+//! 解析用户输入的日期/时间字符串，风格参照 Taskwarrior 命名日期，并支持
+//! RFC 5545 的 `YYYYMMDDTHHMMSS` 紧凑写法（`T` 分隔日期与时间）：
+//! `20260828T090000` 是完整日期时间；`20260828`（8 位）是全天日期
+//! （all-day）；少于 8 位（`0823`、`25`）当作 `YYYYMMDD` 的末尾几位，
+//! 前缀用今天的年月日补齐（`0823`→2026-08-23，`25`→2026-08-25）；
+//! `0828T0900`/`25T` 用 `T` 前的数字当末尾日期、`T` 后的数字当 `HHMMSS`；
+//! `T0900`/`T09` 用今天日期加 `HHMMSS`（自动补零，单独 `T` → 今天 00:00）。
+//! 也支持：`YYYY-MM-DD`、`YYYY-MM-DD HH:MM`、`HH:MM`（今天）、`now`、
+//! 命名日边界（`eod`/`sow`/`eom`…）和相对时间 `+3d`/`-2w`/`+1h`。
+//! 所有本地时间输入通过 `local_to_utc` 转成 UTC（DST 安全、CalDAV 安全）。
 
 use anyhow::{Result, bail};
 use chrono::{
     DateTime, Datelike, Duration, Local, LocalResult, Months, NaiveDate, NaiveDateTime, NaiveTime, Utc,
 };
 
+/// 解析后的日期值：纯日期（可能是全天候选，all-day）或具体日期时间。
 /// A parsed date: date-only (all-day candidate) or a concrete date-time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DateValue {
+    /// 只有日期，没有时刻（例如 `20260824`、`today`）。
     Date(NaiveDate),
+    /// 精确到时刻的 UTC 时间（例如 `20260828T090000`、`now`）。
     Time(DateTime<Utc>),
 }
 
+/// 把用户日期/时间表达式解析成 UTC 时间戳。
 /// Parse a user date/time expression into a UTC timestamp.
 /// Date-only forms land at local midnight (todo `due` semantics).
+/// 纯日期形式会落到本地午夜（待办 `due` 的语义）。
 pub fn parse_datetime(input: &str) -> Result<DateTime<Utc>> {
     match parse_date_value(input)? {
         DateValue::Date(d) => Ok(local_midnight(d)),
@@ -33,12 +38,15 @@ pub fn parse_datetime(input: &str) -> Result<DateTime<Utc>> {
     }
 }
 
+/// 解析日期表达式，区分「只有日期」和「具体日期时间」两种形态。
 /// Parse a date expression, distinguishing date-only from date-time forms.
 pub fn parse_date_value(input: &str) -> Result<DateValue> {
+    // 去掉首尾空格并转小写，让 `TODAY`/`T0900` 也能匹配。
     let s = input.trim().to_lowercase();
-    let now = Local::now();
+    let now = Local::now(); // 当前本地时间，作为「今天/补齐前缀」的基准。
 
     // Named dates that are pure day boundaries → date-only.
+    // 纯日边界的命名词：只返回日期（Date），不包含时刻。
     const DATE_ONLY_NAMED: &[&str] = &[
         "today",
         "tomorrow",
@@ -53,7 +61,7 @@ pub fn parse_date_value(input: &str) -> Result<DateValue> {
         return Ok(DateValue::Time(dt));
     }
 
-    // Relative offsets: +3d, -2w, +1m, +1y, +2h, -1s (against now)
+    // 相对偏移：`+3d`、`-2w`、`+1m`、`+1y`、`+2h`、`-1s`（相对当前时刻）。
     if let Some(rest) = s.strip_prefix(['+', '-']) {
         let unit = rest.chars().last().unwrap_or('d');
         let num = rest.strip_suffix(unit).unwrap_or(rest);
@@ -80,7 +88,7 @@ pub fn parse_date_value(input: &str) -> Result<DateValue> {
         return Ok(DateValue::Time(local_to_utc(ndt)));
     }
 
-    // T-based / compact forms.
+    // 带 `T` 的紧凑形式：`T` 前是日期部分，`T` 后是时间部分。
     if let Some(idx) = s.find('t') {
         let before = &s[..idx];
         let after = &s[idx + 1..];
@@ -89,7 +97,7 @@ pub fn parse_date_value(input: &str) -> Result<DateValue> {
         return Ok(DateValue::Time(local_to_utc(date.and_time(time))));
     }
 
-    // Digits only, no T.
+    // 纯数字且没有 `T`：8 位是 `YYYYMMDD`，更短则用今天补齐前缀。
     if !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) {
         if s.len() == 8 {
             let d = NaiveDate::parse_from_str(&s, "%Y%m%d")?;
@@ -105,7 +113,7 @@ pub fn parse_date_value(input: &str) -> Result<DateValue> {
         return Ok(DateValue::Date(d));
     }
 
-    // "MM-DD" → current year, e.g. `08-26`, `9-30`.
+    // "MM-DD" → 当前年份，例如 `08-26`、`9-30`。
     if let Some((m, d)) = s.split_once('-')
         && let (Ok(m), Ok(d)) = (m.parse::<u32>(), d.parse::<u32>())
         && let Some(dt) = NaiveDate::from_ymd_opt(now.date_naive().year(), m, d)
@@ -113,7 +121,7 @@ pub fn parse_date_value(input: &str) -> Result<DateValue> {
         return Ok(DateValue::Date(dt));
     }
 
-    // "HH:MM" → today at that time
+    // "HH:MM" → 今天该时刻（例如 `18:30`）。
     if let Ok(t) = NaiveTime::parse_from_str(&s, "%H:%M") {
         let ndt = now.date_naive().and_time(t);
         return Ok(DateValue::Time(local_to_utc(ndt)));
@@ -122,10 +130,11 @@ pub fn parse_date_value(input: &str) -> Result<DateValue> {
     bail!("could not parse date `{input}` (try 20260812, 0826, T0900, today, eow, +3d)")
 }
 
+/// 把紧凑日期字符串解析成 `NaiveDate`（无时区的日历日期）。
 /// Resolve a compact date string to a `NaiveDate`.
-/// - empty → today
-/// - >=8 digits → first 8 as `YYYYMMDD`
-/// - <8 digits → trailing digits of today's `YYYYMMDD` (prefix from today)
+/// - 空字符串 → 今天
+/// - ≥8 位 → 取前 8 位当作 `YYYYMMDD`
+/// - <8 位 → 当作今天 `YYYYMMDD` 的末尾数字（前缀取自今天）
 fn resolve_compact_date(digits: &str, now: DateTime<Local>) -> Result<NaiveDate> {
     if digits.is_empty() {
         return Ok(now.date_naive());
@@ -133,6 +142,7 @@ fn resolve_compact_date(digits: &str, now: DateTime<Local>) -> Result<NaiveDate>
     if digits.len() >= 8 {
         return Ok(NaiveDate::parse_from_str(&digits[..8], "%Y%m%d")?);
     }
+    // `25` → 今天的 `20260825` 的后 2 位 → 2026年08月25日。
     let today = now.format("%Y%m%d").to_string();
     let n = digits.len();
     let prefix = &today[..8 - n];
@@ -140,12 +150,13 @@ fn resolve_compact_date(digits: &str, now: DateTime<Local>) -> Result<NaiveDate>
     Ok(NaiveDate::parse_from_str(&full, "%Y%m%d")?)
 }
 
+/// 把紧凑时间字符串解析成 `NaiveTime`（无时区的钟表时间）。
 /// Resolve a compact time string to a `NaiveTime`.
-/// Digits are `HH[MM[SS]]` (left-aligned, zero-padded): `09`→09:00:00,
-/// `0930`→09:30:00, `090000`→full, empty→00:00:00.
+/// 数字是 `HH[MM[SS]]`（左对齐、自动补零）：`09`→09:00:00，
+/// `0930`→09:30:00，`090000`→完整，空→00:00:00。
 fn resolve_compact_time(digits: &str) -> Result<NaiveTime> {
-    // Accept colon forms (`09:30`, `9:30`) — strip separators, left-aligned
-    // `HH[MM[SS]]`; 3 digits mean `HMM` (`930` → 09:30), not 93 hours.
+    // 也接受冒号形式（`09:30`、`9:30`）：去掉冒号后还是左对齐的
+    // `HH[MM[SS]]`；3 位数字表示 `HMM`（`930` → 09:30），不是 93 小时。
     let cleaned: String = digits.chars().filter(|c| *c != ':').collect();
     let cleaned = if cleaned.len() == 3 {
         format!("0{cleaned}")
@@ -161,8 +172,9 @@ fn resolve_compact_time(digits: &str) -> Result<NaiveTime> {
     NaiveTime::from_hms_opt(hh, mm, ss).ok_or_else(|| anyhow::anyhow!("bad time `{digits}`"))
 }
 
+/// 解析人类可读时长：`45min`、`1h`、`1h30m`、`2d`、`90`、`1w`。
 /// Parse a human duration: `45min`, `1h`, `1h30m`, `2d`, `90`, `1w`.
-/// Bare numbers mean minutes.
+/// 裸数字表示分钟（bare numbers mean minutes）。
 pub fn parse_duration(input: &str) -> Result<Duration> {
     let s = input.trim().to_lowercase();
     if s.is_empty() {
@@ -171,6 +183,8 @@ pub fn parse_duration(input: &str) -> Result<Duration> {
     if let Some(d) = parse_iso_duration(&s) {
         return Ok(d);
     }
+    // 逐字符扫描：数字进 `num`，字母进 `unit`。遇到新数字时说明上一个
+    // 「数字+单位」片段结束了，先推入 `parts`。
     let mut parts: Vec<(String, String)> = Vec::new();
     let mut num = String::new();
     let mut unit = String::new();
@@ -187,6 +201,7 @@ pub fn parse_duration(input: &str) -> Result<Duration> {
     if !num.is_empty() {
         parts.push((num, unit));
     } else if let Some(last) = parts.last_mut() {
+        // 只有末尾单位没有数字的情况（不应该发生，防御性兜底）。
         last.1 = unit;
     }
     if parts.is_empty() {
@@ -210,10 +225,11 @@ pub fn parse_duration(input: &str) -> Result<Duration> {
     Ok(total)
 }
 
+/// 解析 ISO 8601 时长（`PT15M`、`PT1H30M`、`P7D`、`P2W`、`PT45S`）。
 /// Parse an ISO 8601 duration (`PT15M`, `PT1H30M`, `P7D`, `P2W`, `PT45S`).
-/// Supported units: D/W (date part), H/M/S (time part). `M` is minutes.
+/// 支持单位：日期部分 D/W，时间部分 H/M/S（`M` 指分钟）。
 fn parse_iso_duration(s: &str) -> Option<Duration> {
-    let body = s.strip_prefix('p')?;
+    let body = s.strip_prefix('p')?; // 必须以 `P` 开头，否则直接返回 None。
     let mut total = Duration::zero();
     let mut num = String::new();
     let mut any = false;
@@ -221,8 +237,10 @@ fn parse_iso_duration(s: &str) -> Option<Duration> {
         if ch.is_ascii_digit() {
             num.push(ch);
         } else if ch == 't' {
+            // `T` 是「日期部分」与「时间部分」的分界符，数字重新开始累计。
             num.clear();
         } else {
+            // 遇到单位字母：把之前累计的数字换算成对应时长并累加。
             let n: i64 = num.parse().ok()?;
             let d = match ch {
                 'd' => Duration::days(n),
@@ -240,10 +258,12 @@ fn parse_iso_duration(s: &str) -> Option<Duration> {
     any.then_some(total)
 }
 
+/// 命名日期。周一是一周的开始（calman 默认）；`eoww` 使用 `day_end` 作为时刻。
 /// Named dates. Week starts Monday (calman default); `eoww` uses `day_end`.
 fn named_date(s: &str) -> Option<DateTime<Utc>> {
     let today = Local::now().date_naive();
     let week_start = monday_of(today);
+    // 三个闭包分别算出「月/季/年」的首日与末日，用于 `som`/`eom`/`soq`…
     let month = |d: NaiveDate| -> (NaiveDate, NaiveDate) {
         let first = NaiveDate::from_ymd_opt(d.year(), d.month(), 1).unwrap();
         let last = first.checked_add_months(Months::new(1)).unwrap() - Duration::days(1);
@@ -262,7 +282,10 @@ fn named_date(s: &str) -> Option<DateTime<Utc>> {
         )
     };
 
+    // 取出配置的当日开始/结束时刻：`sod`（start of day）用开始时刻，
+    // `eod`（end of day）用结束时刻。
     let ((sh, sm, ss), (eh, em, es)) = super::day_bounds();
+    // 每个命名词返回 (首日, 末日, 时刻)；这里只用 first + tm 构造日期时间。
     let (first, _last, tm) = match s {
         "now" => return Some(Utc::now()),
         "today" | "sod" => (today, today, (sh, sm, ss)),
@@ -386,24 +409,32 @@ fn named_date(s: &str) -> Option<DateTime<Utc>> {
     )))
 }
 
+/// 返回包含 `d` 的那个星期的周一。
 /// Monday of the week containing `d`.
 fn monday_of(d: NaiveDate) -> NaiveDate {
+    // 周一为第 0 天，往前偏移即可回到本周一。
     d - Duration::days(i64::from(d.weekday().num_days_from_monday()))
 }
 
+/// 把「无时区的本地时间」转成 UTC；处理夏令时（DST）的歧义/空洞。
 /// Convert a naive local `NaiveDateTime` to UTC, resolving DST ambiguity/gaps.
 pub fn local_to_utc(ndt: NaiveDateTime) -> DateTime<Utc> {
     match ndt.and_local_timezone(Local) {
+        // 唯一结果直接取；夏令时重叠（Ambiguous）取第一个（通常为较早时刻）。
         LocalResult::Single(dt) | LocalResult::Ambiguous(dt, _) => dt.with_timezone(&Utc),
+        // 不存在的时间（DST 跳日）退化为按 UTC 原样理解。
         LocalResult::None => ndt.and_utc(),
     }
 }
 
+/// `d` 的本地午夜（转成 UTC），用于全天任务的存储。
 /// Local midnight of `d` as UTC (used for all-day storage).
 pub fn local_midnight(d: NaiveDate) -> DateTime<Utc> {
     local_to_utc(d.and_hms_opt(0, 0, 0).unwrap())
 }
 
+/// 从用户输入计算 `dtend`。全天（all-day）的 `end` 是「包含式」：
+/// 存储的 DTEND = 结束日期的下一天（iCalendar 惯例）。
 /// Compute `dtend` from user input. All-day `end` is inclusive: stored DTEND = day after.
 pub fn resolve_end(start: DateTime<Utc>, allday: bool, end: DateValue) -> Result<DateTime<Utc>> {
     let start_local = start.with_timezone(&Local);
@@ -412,12 +443,14 @@ pub fn resolve_end(start: DateTime<Utc>, allday: bool, end: DateValue) -> Result
             DateValue::Date(d) => d,
             DateValue::Time(dt) => dt.with_timezone(&Local).date_naive(),
         };
+        // 全天事件的结束日期必须严格晚于开始日期。
         if d <= start_local.date_naive() {
             anyhow::bail!("all-day end must be after start");
         }
         Ok(local_midnight(d + Duration::days(1)))
     } else {
         let e = match end {
+            // 只有日期时，沿用开始时刻（例如 09:00 开始，end 2026-08-25 → 09:00）。
             DateValue::Date(d) => local_to_utc(d.and_time(start_local.time())),
             DateValue::Time(dt) => dt,
         };

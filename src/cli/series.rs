@@ -1,5 +1,10 @@
+//! 重复系列拆分辅助函数（用于按 occurrence 修改/删除）。
 //! Series-splitting helpers for per-occurrence `modify`/`delete`.
 //!
+//! `id.n` 的序号是相对“现在”数的（1 = 下一个即将到来），
+//! 所以要截断系列，必须先把 occurrence 换算成它自己序列里的绝对下标。
+//! 绝对下标 = 该 occurrence 之前存活的展开实例数 + 之前被 EXDATE 排除的空位，
+//! 因为 EXDATE 会占用 COUNT 的序号。
 //! Occurrence addressing (`id.n`) numbers instances relative to *now* (`1` =
 //! next upcoming), so truncating a series needs the absolute 1-based index of
 //! the occurrence within its own recurrence. That index is computed from the
@@ -12,19 +17,26 @@ use chrono::{DateTime, Utc};
 
 /// 1-based absolute index of `occ` in `master`'s series (counting excluded
 /// slots), or `None` when the task is not recurring / `occ` predates DTSTART.
+/// `occ` 在 `master` 系列里的 1-based 绝对下标（把被排除的空位也算进去）；
+/// 非重复任务或 `occ` 早于 DTSTART 时返回 `None`。
+/// 1-based absolute index of `occ` in `master`'s series (counting excluded
+/// slots), or `None` when the task is not recurring / `occ` predates DTSTART.
 pub fn absolute_index(master: &Task, occ: DateTime<Utc>) -> Option<usize> {
     #[cfg(feature = "recur-expand")]
     {
+        // 系列从 DTSTART 开始；occ 不在其后则不是有效实例。
         let dtstart = master.dtstart.or(master.due)?;
         if occ < dtstart || master.rrule.is_none() {
             return None;
         }
+        // 展开 [dtstart, occ) 区间里“仍然存活”的实例数。
         let survived_before = crate::recur_expand::expand_task(
             master,
             dtstart - chrono::Duration::seconds(1),
             occ - chrono::Duration::seconds(1),
         )
         .len();
+        // 再补上被 EXDATE 排除但占序号的空位。
         let ex_before = master
             .exdates
             .iter()
@@ -41,7 +53,12 @@ pub fn absolute_index(master: &Task, occ: DateTime<Utc>) -> Option<usize> {
 
 /// Replace an RRULE's `COUNT` (dropping a conflicting `UNTIL`), so the series
 /// keeps exactly `count` occurrences from its DTSTART.
+/// 把 RRULE 里的 `COUNT` 换成新值（同时去掉冲突的 `UNTIL`），
+/// 这样系列从 DTSTART 起正好还剩 `count` 次。
+/// Replace an RRULE's `COUNT` (dropping a conflicting `UNTIL`), so the series
+/// keeps exactly `count` occurrences from its DTSTART.
 pub fn set_count(rrule: &str, count: usize) -> String {
+    // split(';') 把 RRULE 拆成片段；filter 去掉 COUNT 和 UNTIL 两段。
     let mut parts: Vec<String> = rrule
         .split(';')
         .filter(|p| {
@@ -55,7 +72,11 @@ pub fn set_count(rrule: &str, count: usize) -> String {
 
 /// Remaining number of occurrences `count` in an RRULE (original `COUNT=…`),
 /// accounting for the `abs_idx`-th occurrence becoming the new series start.
+/// 计算 RRULE 剩余次数：原 `COUNT=` 减去已过去的 `abs_idx - 1` 次。
+/// Remaining number of occurrences `count` in an RRULE (original `COUNT=…`),
+/// accounting for the `abs_idx`-th occurrence becoming the new series start.
 pub fn remaining_count(rrule: &str, abs_idx: usize) -> Option<usize> {
+    // find_map 找到第一个满足闭包的片段并转换；and_then 串联 Option。
     let total = rrule
         .split(';')
         .find_map(|p| p.strip_prefix("COUNT="))
@@ -66,20 +87,28 @@ pub fn remaining_count(rrule: &str, abs_idx: usize) -> Option<usize> {
 /// Truncate `master` so its series ends *before* `occ` (the occurrence and
 /// everything after it is removed). Returns `true` when the series has no
 /// remaining occurrences and the master should be deleted outright.
+/// 把 `master` 截断为“到 `occ` 之前结束”的系列（本次及其后全部移除）。
+/// 返回 `true` 表示系列已无剩余实例，主任务应整体删除。
+/// Truncate `master` so its series ends *before* `occ` (the occurrence and
+/// everything after it is removed). Returns `true` when the series has no
+/// remaining occurrences and the master should be deleted outright.
 pub fn truncate_before(master: &mut Task, occ: DateTime<Utc>) -> Result<bool> {
     let Some(idx) = absolute_index(master, occ) else {
         bail!("`{}` is not a recurring occurrence of this task", occ);
     };
+    // 第一次就是要截断的点 → 前面没有任何实例，直接整条删除。
     if idx == 1 {
         return Ok(true);
     }
     let rrule = master.rrule.as_deref().ok_or_else(|| {
         anyhow::anyhow!("task `{}` has no recurrence rule", master.uid)
     })?;
+    // 否则把 COUNT 改成 idx-1，系列自然在 occ 前收尾。
     master.rrule = Some(set_count(rrule, idx - 1));
     Ok(false)
 }
 
+// 测试模块：`cargo test` 时编译。
 #[cfg(test)]
 mod tests {
     use super::*;

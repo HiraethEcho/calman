@@ -1,7 +1,10 @@
+//! `info` 子命令：显示一个或多个任务的完整详情。
 //! `info` subcommand — show full details of one or more items.
 //!
-//! Accepts plain IDs (`calman <id> info` / `calman info <id>`), per-occurrence
-//! IDs (`id.n`), `on:<date>`, source overrides and UIDs.
+//! 支持普通 ID（`calman <id> info` / `calman info <id>`）、单次 occurrence ID
+//! （`id.n`）、`on:<date>`、source 覆盖和 UID。
+//!
+//! 数据流：解析源 → 合并展开 → 按 ID 定位行 → 逐行格式化打印。
 
 use crate::args::ParsedArgs;
 use crate::cli::{Row, load_merged_expanded, resolve_sources};
@@ -9,6 +12,7 @@ use crate::config::{Config, ContextKind};
 use anyhow::{bail, Result};
 use chrono::{DateTime, Local, Utc};
 
+/// 执行 info：对每个 ID 查找对应行并打印详情。
 pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
     if q.ids.is_empty() {
         bail!("no ID(s) specified (usage: `calman info <id>` or `calman <id> info`)");
@@ -25,8 +29,12 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
     Ok(())
 }
 
+/// 按数字 ID（普通或 `id.n` occurrence）或 UID 在合并行里定位。
 /// Locate a row by numeric ID (plain or `id.n` occurrence) or UID.
+///
+/// 返回值带生命周期参数 `'a`：表示返回的引用与输入 `rows` 活得一样久。
 fn find_row<'a>(rows: &'a [Row], id: &str) -> Result<&'a Row> {
+    // `id.n` 形式：把点号前当成父 ID，点号后当成 occurrence 序号 n。
     if let Some((pid, pn)) = id.rsplit_once('.') {
         let parent_id: usize = pid.parse().map_err(|_| {
             anyhow::anyhow!("bad occurrence ID `{id}` (expected `<id>.<n>`)")
@@ -52,9 +60,11 @@ fn find_row<'a>(rows: &'a [Row], id: &str) -> Result<&'a Row> {
                 anyhow::anyhow!("no occurrence `{n}` for recurring task `{parent_id}`")
             })
     } else if let Ok(n) = id.parse::<usize>() {
+        // 纯数字：短 ID 就是 1-based 下标，0-based 需要减 1。
         rows.get(n.checked_sub(1).unwrap_or(usize::MAX))
             .ok_or_else(|| anyhow::anyhow!("no task with ID `{id}`"))
     } else {
+        // 非数字：当作全局唯一 UID 匹配。
         rows.iter()
             .find(|r| r.task.uid == *id)
             .ok_or_else(|| anyhow::anyhow!("no task with UID `{id}`"))
@@ -79,8 +89,10 @@ fn status_txt(s: crate::model::TaskStatus) -> &'static str {
     }
 }
 
+/// 打印一行任务的所有字段（纯展示，不改数据）。
 fn print_row(r: &Row) {
     let t = &r.task;
+    // 标题行：occurrence 显示成 `父ID.序号`，普通任务只显示 ID。
     println!(
         "[{}] {}",
         if let Some(n) = r.occ {
@@ -90,6 +102,7 @@ fn print_row(r: &Row) {
         },
         t.summary
     );
+    // 闭包 field：把“打印一个字段”的逻辑收进小函数，后面反复调用。
     let field = |k: &str, v: String| {
         println!("    {k:<10}: {v}");
     };
@@ -173,6 +186,7 @@ fn print_row(r: &Row) {
     field("uid", t.uid.clone());
 }
 
+// 测试模块：`cargo test` 时编译。
 #[cfg(test)]
 mod tests {
     use super::*;

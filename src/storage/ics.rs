@@ -1,7 +1,20 @@
-//! ICS storage backend (one `<UID>.ics` per task; VTODO/VEVENT).
+//! ICS 存储后端: 每个任务保存为一个 `<UID>.ics` 文件, 使用 VTODO/VEVENT 组件。
+//! (ICS storage backend: one `.ics` file per task, using VTODO/VEVENT components.)
 //!
-//! Layout per DESIGN.md §2.2.B. Field mapping is a minimal but standard
-//! iCalendar serialization covering the core `Task` fields.
+//! ICS 是 RFC 5545 定义的 iCalendar 纯文本格式。顶层是
+//! `BEGIN:VCALENDAR` / `END:VCALENDAR`, 中间是组件 (component):
+//! `VEVENT`(事件) 或 `VTODO`(待办)。
+//! 每个属性 (property) 是一行 `NAME;PARAM=VALUE:内容`,
+//! 例如 `DUE;TZID=Asia/Shanghai:20260825T170000`。
+//! 长行需要按 75 字节折叠 (line folding), 续行以空格开头;
+//! 文本里的 `\` `;` `,` 和换行需要转义 (escaping)。
+//! 时间有两种形态: `VALUE=DATE` 表示全天日期 (all-day, 无时分秒),
+//! 否则是带时区的 `DATE-TIME`; 重复规则用 `RRULE` 表达,
+//! 时区定义可能内嵌在 `VTIMEZONE` 块中。
+//! 本模块实现核心 `Task` 字段与标准 iCalendar 属性之间的映射 (field mapping)。
+//!
+//! 结构: `IcsStorage` 负责读写文件; `render_ics` 把 `Task` 序列化为文本;
+//! `parse_ics` 把文本解析回 `Task`; 其余辅助函数处理折叠、转义、日期格式。
 
 use super::{Storage, atomic_write};
 use crate::date::local_midnight;
@@ -12,28 +25,43 @@ use chrono_tz::Tz;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Storage rooted at a source location holding one `.ics` file per task.
+/// 以目录为根的文件存储: 每个任务一个 `.ics` 文件。
+/// (Storage rooted at a source location, one `.ics` file per task.)
+///
+/// Rust 的 struct 把相关字段打包成一个类型; 这里把 `tasks` 缓存在内存,
+/// 读写时才碰磁盘 —— 实现简单、速度快, 但多进程同时写需要外部锁。
 pub struct IcsStorage {
     dir: PathBuf,
     tz: Tz,
     tasks: Vec<Task>,
 }
 
+/// `IcsStorage` 的方法实现块 (impl block): 定义该类型的关联行为。
 impl IcsStorage {
+    /// 打开(必要时创建)存储目录, 扫描其中所有 `.ics` 文件并解析为 `Task`。
+    /// (Open/create the storage dir, read every `*.ics` file, parse each into a `Task`.)
+    ///
+    /// - `location`: 目录路径; `tz`: 默认 IANA 时区, 用于解析无 TZID 的时间。
+    /// - `&Path` 是借用 (borrow): 只读路径, 不取得所有权 (ownership)。
+    /// - `Result<Self>` 表示操作可能失败; `?` 运算符遇错立即向上返回 (error propagation)。
     pub fn open(location: &Path, tz: Tz) -> Result<Self> {
         fs::create_dir_all(location)
             .with_context(|| format!("create storage dir {}", location.display()))?;
         let mut tasks = Vec::new();
-        // First pass: read + parse, remap storage uid to the filename, and
-        // record in-file ICS UID -> filename so override `parent_uid`s (which
-        // carry the master's ICS UID) can be resolved to the master's storage
-        // key below (external CalDAV files may use a filename ≠ UID).
+        // 第一遍 (first pass): 读取并解析每个文件, 把存储键从文件内 UID 改成文件名,
+        // 同时记录 `文件内 UID -> 文件名` 的映射表。
+        // 为什么需要映射: 外部 CalDAV 文件可能文件名 ≠ UID;
+        // 而 override(单次改期)文件会沿用主事件的 UID,
+        // 必须靠这张表把 `parent_uid` 解析到真正的主任务文件。
         let mut uid_to_file: std::collections::HashMap<String, String> = Default::default();
         let entries =
             fs::read_dir(location).with_context(|| format!("read dir {}", location.display()))?;
         for entry in entries {
             let entry = entry?;
             let path = entry.path();
+            // 只处理 `.ics` 文件。`extension()` 返回 `Option`,
+            // `and_then` 链式取出字符串后与 `Some("ics")` 比较;
+            // 不是该扩展名就 `continue` 跳到下一个目录项。
             if path.extension().and_then(|e| e.to_str()) != Some("ics") {
                 continue;
             }
@@ -41,9 +69,9 @@ impl IcsStorage {
                 match parse_ics(&content) {
                     Ok(mut task) => {
                         if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                            // Master files (no RECURRENCE-ID) win the UID→file
-                            // map: overrides reuse the master's ICS UID and must
-                            // not shadow the master's storage key.
+                            // 主文件(没有 RECURRENCE-ID)优先占位 UID→文件 映射:
+                            // override 复用主事件的 ICS UID, 不能让 override 反客为主,
+                            // 否则后续把 parent_uid 解析成 override 自己的文件。
                             if task.recurrence_id.is_none()
                                 || !uid_to_file.contains_key(&task.uid)
                             {
@@ -60,6 +88,8 @@ impl IcsStorage {
                 }
             }
         }
+        // 第二遍 (second pass): 把每个任务的 `parent_uid` 从文件内 UID
+        // 换算成存储文件名, 使 override 能指向真正的主任务文件。
         for t in &mut tasks {
             if let Some(pid) = &t.parent_uid
                 && let Some(key) = uid_to_file.get(pid)
@@ -74,22 +104,33 @@ impl IcsStorage {
         })
     }
 
+    /// 计算某个 uid 对应的文件路径: `<目录>/<uid>.ics`。
+    /// (Return the file path for a uid.)
+    /// `&self` 表示只借用 self(不改状态); `format!` 是字符串格式化宏。
     fn file_for(&self, uid: &str) -> PathBuf {
         self.dir.join(format!("{uid}.ics"))
     }
 }
 
 impl Storage for IcsStorage {
+    /// 返回当前内存中全部任务的切片 (slice)。
+    /// (Borrowed view of all tasks.) 返回 `&[Task]` 是借用而非拷贝。
     fn list(&self) -> &[Task] {
         &self.tasks
     }
 
+    /// 新增任务: 先原子写入 ICS 文件, 成功后再加入内存列表。
+    /// (Add: atomically write the file first, then push to memory.)
+    /// 原子写入 (atomic_write) 防止写一半留下损坏文件。
     fn add(&mut self, task: Task) -> Result<()> {
         atomic_write(&self.file_for(&task.uid), render_ics(&task, self.tz)?.as_bytes())?;
         self.tasks.push(task);
         Ok(())
     }
 
+    /// 按 uid 查找任务, 用闭包 `f` 修改它, 再写回文件并刷新 `updated_at`。
+    /// (Update: find by uid, apply closure `f`, persist, bump `updated_at`.)
+    /// `FnOnce` 闭包只能调用一次; `Option<Task>` 返回 `None` 表示 uid 不存在。
     fn update<F>(&mut self, uid: &str, f: F) -> Result<Option<Task>>
     where
         F: FnOnce(&mut Task) -> Result<()>,
@@ -105,6 +146,8 @@ impl Storage for IcsStorage {
         Ok(Some(t.clone()))
     }
 
+    /// 删除任务: 先从内存移除, 再删除对应的 `.ics` 文件(若存在)。
+    /// (Remove from memory, then delete the file if present.)
     fn remove(&mut self, uid: &str) -> Result<Option<Task>> {
         let Some(pos) = self.tasks.iter().position(|t| t.uid == uid) else {
             return Ok(None);
@@ -118,20 +161,26 @@ impl Storage for IcsStorage {
     }
 }
 
-/// Render a date property (DUE/DTSTART/DTEND/EXDATE/RECURRENCE-ID) in its
-/// all-day (`;VALUE=DATE`) or timed (`;TZID=`) form.
+/// 生成日期属性行: 全天用 `;VALUE=DATE` + `YYYYMMDD`, 带时间用 `;TZID=<时区>` + 本地时间。
+/// (Render a date property: all-day `;VALUE=DATE` or timed `;TZID=` form.)
+/// DUE/DTSTART/DTEND/EXDATE/RECURRENCE-ID 共用此格式化逻辑。
 fn ics_date_prop(name: &str, d: DateTime<Utc>, allday: bool, tz: Tz) -> String {
     if allday {
+        // 全天日期不带时区: 取本地时区的日期部分, 只保留 YYYYMMDD。
         format!("{name};VALUE=DATE:{}", d.with_timezone(&Local).format("%Y%m%d"))
     } else {
         format!("{name};TZID={}:{}", tz.name(), dt_local(d, tz))
     }
 }
 
+/// 按 RFC 5545 规则把长属性行折叠 (fold): 超过 75 字节时断开, 续行以空格开头。
+/// (Fold lines at 75 octets; continuation lines start with a space.)
+/// 注意: 这里按字符数近似字节数 (approximated via chars), 对纯 ASCII 属性足够。
 fn fold(line: &str) -> String {
-    // RFC 5545 line folding at 75 octets (approximated via chars).
     let mut out = String::new();
     let mut remaining = line;
+    // 75 字节中折行空格占 1 字节, 所以每段正文最多 73 字符。
+    // `char_indices` 给出每个 UTF-8 字符的字节偏移, 避免从字符中间切开。
     while remaining.chars().count() > 73 {
         let cut = remaining
             .char_indices()
@@ -147,7 +196,14 @@ fn fold(line: &str) -> String {
     out
 }
 
-/// Render a task as a full VCALENDAR document.
+/// 把 `Task` 序列化成完整的 VCALENDAR 文本(含折行)。
+/// (Render a task as a full VCALENDAR document.)
+///
+/// 要点:
+/// - 顶层固定写 `BEGIN:VCALENDAR` / `VERSION:2.0` / `CALSCALE:GREGORIAN` / `PRODID`。
+/// - 组件由 `task.event` 决定: 事件 → `VEVENT`, 待办 → `VTODO`。
+/// - 必填属性: `UID`、`SUMMARY`、`DTSTAMP`(RFC 5545 要求)、`STATUS`。
+/// - 所有文本值经 `escape_text` 转义, 所有属性行经 `fold` 折叠。
 pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
     let mut lines = String::new();
     lines.push_str("BEGIN:VCALENDAR\r\n");
@@ -155,15 +211,17 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
     lines.push_str("CALSCALE:GREGORIAN\r\n");
     lines.push_str("PRODID:-//calman//calman//EN\r\n");
 
+    // 事件用 VEVENT, 待办用 VTODO; 两种组件允许的属性集合不同。
     let component = if task.event { "VEVENT" } else { "VTODO" };
     lines.push_str(&format!("BEGIN:{component}\r\n"));
 
     let mut props = Vec::new();
-    // Override components use the master's UID; parent_uid holds the stored uid.
+    // override 组件沿用主事件的 UID(CalDAV 约定); 存储键保存在 parent_uid。
+    // `as_deref()` 把 `Option<String>` 变成 `Option<&str>`, 再 `unwrap_or` 回退到自己的 uid。
     let uid = task.parent_uid.as_deref().unwrap_or(&task.uid);
     props.push(format!("UID:{}", escape_text(uid)));
     props.push(format!("SUMMARY:{}", escape_text(&task.summary)));
-    // DTSTAMP is REQUIRED by RFC 5545; SEQUENCE aids CalDAV sync ordering.
+    // DTSTAMP 是 RFC 5545 要求的属性; SEQUENCE 帮助 CalDAV 同步判断顺序。
     props.push(format!("DTSTAMP:{}", dt(Utc::now())));
     props.push("SEQUENCE:0".to_string());
     props.push(format!(
@@ -174,13 +232,13 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
             status_to_ics(task.status)
         }
     ));
-    // VEVENT only permits TENTATIVE/CONFIRMED/CANCELLED, so calman's own
-    // Completed/InProgress would round-trip as Pending; persist them in a
-    // private property (ignored by other clients).
+    // VEVENT 只允许 TENTATIVE/CONFIRMED/CANCELLED 三种状态,
+    // calman 的 Completed/InProgress 若直接写 STATUS 会变成 Pending 回来;
+    // 因此用私有属性 X-CALMAN-STATUS 保存真实状态(其他客户端会忽略它)。
     if component == "VEVENT" && matches!(task.status, TaskStatus::Completed | TaskStatus::InProgress) {
         props.push(format!("X-CALMAN-STATUS:{}", status_to_ics(task.status)));
     }
-    // iPhone/standard clients expect explicit transparency on events.
+    // iPhone 等标准客户端要求事件明确声明透明度 (transparency)。
     if component == "VEVENT" {
         props.push("TRANSP:OPAQUE".to_string());
     }
@@ -188,6 +246,7 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
         props.push(format!("PRIORITY:{p}"));
     }
     if !task.tags.is_empty() {
+        // CATEGORIES 用逗号分隔多个标签; 每个标签先转义再 join。
         props.push(format!(
             "CATEGORIES:{}",
             task.tags
@@ -208,7 +267,7 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
     if let Some(c) = task.completed_at {
         props.push(format!("COMPLETED:{}", dt(c)));
     }
-    // VTODO has no DTSTART/DTEND per RFC 5545 — only VEVENT writes them.
+    // RFC 5545 规定 VTODO 没有 DTSTART/DTEND —— 只有 VEVENT 才写它们。
     if task.event
         && let Some(d) = task.dtstart
     {
@@ -222,11 +281,11 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
     if let Some(r) = &task.rrule {
         props.push(format!("RRULE:{r}"));
     }
-    // Emit EXDATE for each excluded occurrence.
+    // 每个被排除的重复发生项 (excluded occurrence) 输出一条 EXDATE。
     for ex in &task.exdates {
         props.push(ics_date_prop("EXDATE", *ex, task.allday, tz));
     }
-    // Emit RECURRENCE-ID for override instances.
+    // override 实例输出 RECURRENCE-ID, 标明它修改的是哪一次发生。
     if let Some(rid) = task.recurrence_id {
         props.push(ics_date_prop("RECURRENCE-ID", rid, task.allday, tz));
     }
@@ -246,10 +305,12 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
         props.push(format!("RELATED-TO:{r}"));
     }
 
+    // 最后把所有属性行折叠后写入, 再追加闹钟子组件 (VALARM)。
     for p in props {
         lines.push_str(&fold(&p));
     }
     if let Some(secs) = task.alarm_before {
+        // VALARM 是嵌套在组件内的子块; TRIGGER 用负的 ISO 8601 时长表示“提前多少秒”。
         lines.push_str(&format!("BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT{secs}S\r\nDESCRIPTION:{}\r\nEND:VALARM\r\n", escape_text(&task.summary)));
     }
     lines.push_str(&format!("END:{component}\r\n"));
@@ -257,7 +318,11 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
     Ok(lines)
 }
 
-/// Parse a VCALENDAR document into a `Task`.
+/// 把 VCALENDAR 文本解析成一个 `Task`。
+/// (Parse a VCALENDAR document into a `Task`.)
+///
+/// 采用迭代式逐行解析 (iterative line loop): 先拆行, 再按属性名分发处理。
+/// 局部变量用 `let mut` 在循环中累积状态; `Option` 字段以 `None` 表示“属性未出现”。
 pub fn parse_ics(content: &str) -> Result<Task> {
     let mut event_kind = false;
     let mut uid = String::new();
@@ -286,7 +351,13 @@ pub fn parse_ics(content: &str) -> Result<Task> {
     let mut wait = None;
     let mut started_at = None;
 
+    // 这些 `let mut` 变量逐行累积属性值; 循环结束后组装成 `Task`。
+    // 例如 `due: Option<DateTime<Utc>>` 在遇到 DUE 属性前一直是 None。
     for raw in unfold(content) {
+        // 属性行格式: `名字;参数=值:内容`。
+        // 先按第一个冒号切出 `name`(含参数)和 `value`(内容);
+        // `name.split(';').next()` 再取冒号前第一段作为属性名(如 DUE),
+        // 参数(如 TZID=Asia/Shanghai)留在 name 中供 `param_tzid` 读取。
         let (name, value) = raw
             .split_once(':')
             .map(|(n, v)| (n.trim(), v.trim()))
@@ -307,9 +378,9 @@ pub fn parse_ics(content: &str) -> Result<Task> {
             in_alarm = false;
             continue;
         }
-        // VTIMEZONE blocks carry their own DTSTART/RRULE definitions that
-        // must NOT overwrite the component's real properties (this is how
-        // CalDAV servers ship recurring events).
+        // VTIMEZONE 块内部有自己的 DTSTART/RRULE 定义,
+        // 必须跳过, 不能覆盖组件(VEVENT/VTODO)的真实属性 ——
+        // CalDAV 服务器常用 VTIMEZONE 内嵌时区定义。
         if key == "BEGIN" && value == "VTIMEZONE" {
             in_vtimezone = true;
             continue;
@@ -328,7 +399,7 @@ pub fn parse_ics(content: &str) -> Result<Task> {
             "STATUS" => status = status_from_ics(value),
             "X-CALMAN-STATUS" => status = status_from_ics(value),
             "PRIORITY" => priority = value.parse().ok(),
-            // Unescape first so escaped commas (`\,`) in a tag survive splitting.
+            // 先整体反转义, 再按逗号切分: 这样转义过的 `\,` 才不会误切成两个标签。
             "CATEGORIES" => tags = unescape_text(value).split(',').map(unescape_text).collect(),
             "DUE" if name.contains("VALUE=DATE") => {
                 allday = true;
@@ -372,7 +443,8 @@ pub fn parse_ics(content: &str) -> Result<Task> {
                 };
             }
             "EXDATE" => {
-                // RFC 5545 allows a comma-separated list of excluded datetimes.
+                // RFC 5545 允许 EXDATE 用逗号分隔多个被排除的时间。
+                // 每个值再按“全天 / 带 TZID / 普通 UTC”三种情况分别解析。
                 let tz = param_tzid(name);
                 for v in value.split(',') {
                     let d = match (&tz, name.contains("VALUE=DATE")) {
@@ -393,9 +465,8 @@ pub fn parse_ics(content: &str) -> Result<Task> {
                     (None, _) => parse_dt(value),
                 };
                 recurrence_id = d;
-                // For an override component, the UID stays the master's uid;
-                // we record the current uid as parent_uid and use the
-                // current (per-component) uid for storage.
+                // override 组件的 UID 仍是主事件的 UID(CalDAV 约定);
+                // 把当前 UID 记到 parent_uid, 存储时再用文件名作为自己的键。
                 if !uid.is_empty() {
                     parent_uid = Some(uid.clone());
                 }
@@ -409,7 +480,7 @@ pub fn parse_ics(content: &str) -> Result<Task> {
         }
     }
 
-    // A component carrying RRULE is the recurring master.
+    // 带 RRULE 的组件就是重复主任务 (recurring master)。
     if rrule.is_some() {
         status = TaskStatus::Recurring;
     }
@@ -447,6 +518,9 @@ pub fn parse_ics(content: &str) -> Result<Task> {
     })
 }
 
+/// 把 UTC 时间格式化成 ICS 的 UTC 时间戳 (basic format, 末尾带 Z)。
+/// (Format a UTC instant as an ICS UTC timestamp ending in `Z`.)
+/// 例如 `2026-08-25T02:00:00Z` → `20260825T020000Z`。
 fn dt(d: DateTime<Utc>) -> String {
     d.to_rfc3339_opts(SecondsFormat::Secs, true)
         .replace(['-', ':', '+'], "")
@@ -455,11 +529,15 @@ fn dt(d: DateTime<Utc>) -> String {
         + "Z"
 }
 
-/// Format a UTC instant as the local wall-clock time in `tz` (no `Z`).
+/// 把 UTC 时刻换算成 `tz` 时区的本地挂钟时间, 不带 Z。
+/// (Format a UTC instant as the local wall-clock time in `tz` (no `Z`).)
+/// 这样的时间必须配合属性上的 `TZID=` 参数一起使用才有完整含义。
 fn dt_local(d: DateTime<Utc>, tz: Tz) -> String {
     d.with_timezone(&tz).format("%Y%m%dT%H%M%S").to_string()
 }
 
+/// 解析末尾带 Z 的 UTC 时间戳, 形如 `20260825T020000Z`。
+/// (Parse a UTC timestamp ending in `Z`.) 失败时返回 `None` 而不是报错。
 fn parse_dt(s: &str) -> Option<DateTime<Utc>> {
     let s = s.trim();
     if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(s, "%Y%m%dT%H%M%SZ") {
@@ -468,27 +546,34 @@ fn parse_dt(s: &str) -> Option<DateTime<Utc>> {
     None
 }
 
-/// Parse `VALUE=DATE` date-only values as local midnight UTC.
+/// 解析 `VALUE=DATE` 的纯日期值: 当作本地时区的当天零点 (midnight) 存入 UTC。
+/// (Parse `VALUE=DATE` date-only values as local midnight UTC.)
+/// ICS 全天事件不含时区, calman 统一用本地午夜作为内部表示。
 fn parse_all_day(s: &str) -> Option<DateTime<Utc>> {
     let d = chrono::NaiveDate::parse_from_str(s.trim(), "%Y%m%d").ok()?;
     Some(local_midnight(d))
 }
 
-/// Extract `TZID=` parameter from a property name like `DTSTART;TZID=Asia/Shanghai`.
+/// 从属性名里提取 `TZID=` 参数, 例如 `DTSTART;TZID=Asia/Shanghai` → `Asia/Shanghai`。
+/// (Extract `TZID=` parameter from a property name.)
+/// 用 `split(';')` 把参数逐段切开, `find_map` 只返回第一个匹配的 TZID。
 fn param_tzid(name: &str) -> Option<String> {
     name.split(';')
         .find_map(|p| p.strip_prefix("TZID="))
         .map(|s| s.to_string())
 }
 
-/// Parse a local wall time with an IANA `TZID` into UTC.
-/// Unknown/custom TZID falls back to the system local zone (no data loss).
+/// 把带 IANA `TZID` 的本地时间解析成 UTC。
+/// (Parse a local wall time with an IANA `TZID` into UTC.)
+/// 未知/自定义 TZID 回退到系统本地时区 (no data loss on unusual files)。
 fn parse_tz(value: &str, tzid: &str) -> Option<DateTime<Utc>> {
     let s = value.trim();
     let naive = NaiveDateTime::parse_from_str(s, "%Y%m%dT%H%M%S")
         .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y%m%dT%H%M"))
         .ok()?;
     if let Ok(tz) = tzid.parse::<Tz>() {
+        // DST 切换可能导致一个本地时间出现两次 (ambiguous) 或不存在;
+        // `earliest()` 取第一次出现, 实在没有就按 UTC 解释, 避免解析失败。
         Some(
             tz.from_local_datetime(&naive)
                 .earliest()
@@ -506,7 +591,9 @@ fn parse_tz(value: &str, tzid: &str) -> Option<DateTime<Utc>> {
     }
 }
 
-/// Parse a VALARM trigger like `-PT15M`, `-PT900S`, `-P1D` → seconds.
+/// 解析 VALARM 的触发时长, 如 `-PT15M`、`-PT900S`、`-P1D`, 统一换算成秒。
+/// (Parse a VALARM trigger like `-PT15M`, `-PT900S`, `-P1D` → seconds.)
+/// 负号表示“提前”, 返回负数供调用方使用。
 fn parse_trigger(s: &str) -> Option<i64> {
     let s = s.trim().trim_start_matches('-');
     let s = s.strip_prefix('P')?;
@@ -514,6 +601,7 @@ fn parse_trigger(s: &str) -> Option<i64> {
         Some((d, t)) => (d, Some(t)),
         None => (s, None),
     };
+    // ISO 8601 时长: `P` 后是日期部分(D=天/W=周), `T` 后是时间部分(H/M/S)。
     let mut secs: i64 = 0;
     if let Some(d) = date_part.strip_suffix('D') {
         secs += d.parse::<i64>().ok()? * 86_400;
@@ -535,6 +623,8 @@ fn parse_trigger(s: &str) -> Option<i64> {
     Some(secs)
 }
 
+/// 把 calman 状态映射成 ICS 的 VTODO STATUS 值。
+/// (Map internal `TaskStatus` to the ICS VTODO `STATUS` value.)
 fn status_to_ics(s: TaskStatus) -> &'static str {
     match s {
         TaskStatus::Pending => "NEEDS-ACTION",
@@ -545,7 +635,9 @@ fn status_to_ics(s: TaskStatus) -> &'static str {
     }
 }
 
-/// VEVENT permits only TENTATIVE/CONFIRMED/CANCELLED (RFC 5545).
+/// VEVENT 只允许 TENTATIVE/CONFIRMED/CANCELLED(RFC 5545 限制)。
+/// (VEVENT permits only TENTATIVE/CONFIRMED/CANCELLED.)
+/// 因此非取消状态统一写成 CONFIRMED, 真实状态由 X-CALMAN-STATUS 保存。
 fn event_status_to_ics(s: TaskStatus) -> &'static str {
     match s {
         TaskStatus::Cancelled => "CANCELLED",
@@ -554,6 +646,8 @@ fn event_status_to_ics(s: TaskStatus) -> &'static str {
     }
 }
 
+/// 解析 ICS STATUS 字符串回 calman 状态; 也兼容拼写 CANCELED。
+/// (Parse an ICS `STATUS` value back to `TaskStatus`.)
 fn status_from_ics(s: &str) -> TaskStatus {
     match s.to_uppercase().as_str() {
         "COMPLETED" => TaskStatus::Completed,
@@ -563,18 +657,25 @@ fn status_from_ics(s: &str) -> TaskStatus {
     }
 }
 
+/// 按 RFC 5545 转义文本值: `\` → `\\`, `;` → `\;`, `,` → `\,`, 换行 → `\n`。
+/// (Escape text per RFC 5545 so reserved characters survive round-trip.)
 fn escape_text(s: &str) -> String {
+    // 顺序重要: 必须先转义反斜杠, 否则后续替换产生的 `\` 会被误判。
     s.replace('\\', "\\\\")
         .replace(';', "\\;")
         .replace(',', "\\,")
         .replace('\n', "\\n")
 }
 
+/// 反转义 ICS 文本: 把 `\n` `\,` `\;` `\\` 还原成真实字符。
+/// (Unescape RFC 5545 text values.)
+/// 用迭代器逐个字符扫描, 遇到反斜杠时看下一个字符决定还原成什么。
 fn unescape_text(s: &str) -> String {
     let mut out = String::new();
     let mut chars = s.chars();
     while let Some(c) = chars.next() {
         if c == '\\' {
+            // 反斜杠后跟 n/逗号/分号/反斜杠 → 还原; 未知序列保留原样(宽容解析)。
             match chars.next() {
                 Some('n') => out.push('\n'),
                 Some(',') => out.push(','),
@@ -593,10 +694,13 @@ fn unescape_text(s: &str) -> String {
     out
 }
 
-/// Unfold RFC 5545 folded lines, dropping continuation spaces.
+/// 把 RFC 5545 折叠行展开 (unfold): 去掉续行开头的空格, 拼回完整逻辑行。
+/// (Unfold folded lines, dropping continuation spaces.)
+/// 这是读取 ICS 的第一步: 先合并续行, 才能按冒号正确切分属性。
 fn unfold(content: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut current = String::new();
+    // 以空格开头的行是上一行的续行 (continuation line), 去掉空格后拼接。
     for line in content.lines() {
         if let Some(rest) = line.strip_prefix(' ') {
             current.push_str(rest);
@@ -613,6 +717,8 @@ fn unfold(content: &str) -> Vec<String> {
     out
 }
 
+// 测试模块: `#[cfg(test)]` 只在 `cargo test` 时编译, 正常构建会忽略。
+// (Test module: compiled only under `cargo test`; ordinary builds skip it.)
 #[cfg(test)]
 mod tests {
     use super::*;

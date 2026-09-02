@@ -168,12 +168,9 @@ calman sync work
 
 ## Documentation
 
-- `SPEC.md` — product spec & decisions
-- `DESIGN.md` — detailed functional design
-- `PLAN.md` — phased roadmap
-- `todo.md` — 未完成需求
-- `done.md` — 已完成需求对照
-- `AGENTS.md` — developer guide
+- User docs: `docs/` (`index.md` is the entry page)
+- **Learning the source** 学习源码: `docs/learning/LEARN.md` — bilingual Rust
+  guides + module map + code workflow (源码带中英双语注释)
 
 ## License
 
