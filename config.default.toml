@@ -77,7 +77,7 @@ cancelled = "✕"
 [colorscheme]
 priority = ["completed", "cancelled", "overdue", "today", "due",
             "priority.H", "priority.M", "priority.L",
-            "scheduled", "tagged",
+            "tagged",
             "blocked", "blocking"]
 # [colorscheme.palette]
 # blue = "#1e90ff"
@@ -89,7 +89,6 @@ due = {fg="yellow"}
 cancelled = {fg="gray10"}
 blocked = {fg="gray10"}
 blocking = {fg="gray10"}
-scheduled = {fg="gray10"}
 tagged = {fg="gray10"}
 "priority.H" = {fg="red", bold=true}
 "priority.M" = {fg="yellow"}

@@ -9,7 +9,7 @@
 # Each row is wrapped by the FIRST rule whose condition matches, scanning
 # `priority` top-to-bottom. Available rules:
 #   completed  cancelled  overdue  today  due
-#   blocked  blocking  scheduled  tagged
+#   blocked  blocking  tagged
 #   priority.L  priority.M  priority.H
 # ============================================================================
 
@@ -17,7 +17,7 @@
 # Precedence: first rule that matches wins.
 priority = ["completed", "cancelled", "overdue", "today", "due",
             "priority.H", "priority.M", "priority.L",
-            "scheduled", "tagged",
+            "tagged",
             "blocked", "blocking"]
 
 # Optional named colors, referenced by fg/bg below (and inline #RRGGBB works too).
@@ -40,7 +40,6 @@ due         = {fg="yellow", bold=true, italic=true}
 cancelled   = {fg="#7f8c8d"}
 blocked     = {fg="gray"}
 blocking    = {fg="gray"}
-scheduled   = {fg="gray"}
 tagged      = {fg="gray"}
 "priority.H" = {fg="red", bold=true}
 "priority.M" = {fg="yellow"}

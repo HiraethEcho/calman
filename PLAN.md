@@ -168,6 +168,15 @@ Minimal build: `--no-default-features --features storage-ics,date-ical`.
 - [x] `src:` alias for `source:` (CLI + filter); `desc:` capture fixed with `src:`; multiline `desc` single-line render (`␤`) + display-width truncation (`unicode-width`); CJK-safe arg prefix checks.
 - [x] Composite `ics-dir` sources (`remote/sorge`) fixed for `done`/`delete`/`modify` via `cli::resolve_source`.
 
+### 2.8 Virtual-tag semantics refinement (completed)
+- [x] `OVERDUE` matches **VTODO only** (past `due`, not done); events never match — `filter::is_overdue` + report `overdue` color rule.
+- [x] Add `+DUE` virtual tag = a VTODO with a `due` date (`Flag::Due`, `virtual_flag`).
+- [x] Remove `+SCHEDULED` virtual tag (no longer `+SCHEDULED` → literal tag).
+- [x] Remove `ACTIVE` alias for `PENDING` (`+ACTIVE` → literal tag; `status:active` kept).
+- [x] Remove the `scheduled` row rule from `[colorscheme]` (priority list + `rules`) in `config.default.toml`, `colorscheme.example.toml`, `src/report.rs` `DEFAULT_PRIORITY`/`rule_matches`, and docs.
+- [x] Fix priority test expectations: `priority:H → 1`, `pri:L → 9` (matching `priority_from_str`).
+- [x] Update help/README/docs (`filters.md`, `reports.md`) + `SPEC.md` decision + tests.
+
 ---
 
 ## Phase 3: TUI Complete Implementation

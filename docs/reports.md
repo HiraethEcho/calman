@@ -146,7 +146,7 @@ Row-level colors use the `[colorscheme]` table. Live in `colorscheme.example.tom
 ```toml
 [colorscheme]
 priority = ["completed", "overdue", "today", "due", "cancelled",
-            "blocked", "blocking", "scheduled", "tagged",
+            "blocked", "blocking", "tagged",
             "priority.H", "priority.M", "priority.L"]
 
 [colorscheme.palette]
@@ -162,14 +162,14 @@ due         = {fg="yellow", bold=true, italic=true}
 
 - `priority` is the rule precedence (first matching rule wins). Omit it to use
   the built-in order: `completed cancelled overdue today due priority.H priority.M
-  priority.L scheduled tagged blocked blocking`.
+  priority.L tagged blocked blocking`.
 - Each entry under `[colorscheme.rules]` accepts optional `fg` / `bg` (a named
   color, a `#RRGGBB` hex, or a name from `palette`) and toggles `bold` /
   `italic` / `underline` / `dim` / `inverse`.
 - Named colors: `black red green yellow blue magenta cyan white`, `bright-*`,
   `gray`/`grey`, and `gray0`–`gray23` (256-scale).
 - Supported rules: `completed`, `overdue`, `today`, `due`,
-  `cancelled`, `blocked`, `blocking`, `scheduled`, `tagged`,
+  `cancelled`, `blocked`, `blocking`, `tagged`,
   `priority.L|M|H`.
 
 **What each rule matches** (first matching rule in `priority` order wins):
@@ -177,11 +177,10 @@ due         = {fg="yellow", bold=true, italic=true}
 | Rule | Matches |
 | :--- | :------ |
 | `completed` | status `completed` |
-| `overdue` | a `due`/`dtstart` whose day is before today and not done (covers both todos **and** events) |
+| `overdue` | a **VTODO** whose `due` day is before today and not done (events never match) |
 | `today` | `due` falls on the local calendar day |
 | `due` | has any `due` |
 | `cancelled` | status `cancelled` (was `deleted` in Taskwarrior) |
-| `scheduled` | is an event (has `dtstart`) |
 | `blocked` | a parent todo referenced by another item's `related_to` |
 | `blocking` | a todo that has a `related_to` |
 | `tagged` | has ≥1 tag |

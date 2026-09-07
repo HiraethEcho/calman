@@ -120,7 +120,7 @@ type:todo | type:event | type:all        (+TODO / +EVENT)
 source:work   -source:work
 due:today (exact day)  due.before:<  due.by:<=  due.after:>=
 status:pending|in-progress|completed|cancelled|recurring|active
-+OVERDUE +PENDING +COMPLETED +CANCELLED +IN-PROCESS +TAGGED +UNTAGGED +SCHEDULED +PARENT
++OVERDUE +PENDING +DUE +COMPLETED +CANCELLED +IN-PROCESS +TAGGED +UNTAGGED +PARENT
 +tag / -tag
 ```
 

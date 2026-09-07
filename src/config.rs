@@ -226,7 +226,7 @@ impl Default for TuiConfig {
 pub struct ColorSchemeCfg {
     /// Rule precedence (first match wins). Supported rule keys:
     /// completed cancelled overdue today due blocked blocking
-    /// scheduled tagged priority.L priority.M priority.H.
+    /// tagged priority.L priority.M priority.H.
     #[serde(default)]
     pub priority: Vec<String>,
     /// Named colors → hex (or any CSS-style value), referenced by `fg`/`bg`.

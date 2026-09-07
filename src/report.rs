@@ -667,7 +667,7 @@ fn colorize(conf: &Config, parents: &HashSet<&str>, r: &Row, line: &str) -> Stri
 const DEFAULT_PRIORITY: &[&str] = &[
     "completed", "cancelled", "overdue", "today", "due",
     "priority.H", "priority.M", "priority.L",
-    "scheduled", "tagged", "blocked", "blocking",
+    "tagged", "blocked", "blocking",
 ];
 
 fn rule_style_to_style(rs: &crate::config::RuleStyle, palette: &HashMap<String, String>) -> Style {
@@ -692,7 +692,7 @@ fn rule_matches(key: &str, parents: &HashSet<&str>, r: &Row) -> bool {
     match key {
         "deleted" => false, // calman hard-deletes; no deleted state
         "completed" => t.status == TaskStatus::Completed,
-        "overdue" => crate::filter::task_date(t).is_some_and(|d| {
+        "overdue" => !t.is_event() && t.due.is_some_and(|d| {
             d.with_timezone(&Local).date_naive() < Local::now().date_naive()
         }) && !t.status.is_done(),
         "today" => crate::filter::task_date(t).is_some_and(|d| {
@@ -702,7 +702,6 @@ fn rule_matches(key: &str, parents: &HashSet<&str>, r: &Row) -> bool {
         "cancelled" => t.status == TaskStatus::Cancelled,
         "blocked" => parents.contains(t.uid.as_str()),
         "blocking" => t.related_to.is_some(),
-        "scheduled" => t.is_event(),
         "tagged" => !t.tags.is_empty(),
         "priority.L" => t.priority == Some(9),
         "priority.M" => t.priority == Some(5),

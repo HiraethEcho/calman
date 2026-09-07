@@ -33,15 +33,15 @@ offsets like `+3d`.
 
 | Tag | Matches |
 | :-- | :------ |
-| `+OVERDUE` | Date in the past and not completed/cancelled (all-day due is overdue only after its day). |
-| `+PENDING` / `+ACTIVE` | Active (not completed/cancelled). **Events count as pending.** |
+| `+OVERDUE` | A **VTODO** whose `due` is in the past and not completed/cancelled (all-day due is overdue only after its day). Events never match. |
+| `+PENDING` | Active (not completed/cancelled). **Events count as pending.** |
+| `+DUE` | A VTODO that has a `due` date. |
 | `+COMPLETED` / `+DONE` | Completed. |
 | `+CANCELLED` / `+CANCELED` | Cancelled. |
 | `+IN-PROGRESS` | In-progress (status). |
 | `+STARTED` | `calman start <id>` recorded a start time (`started_at`). |
 | `+TAGGED` | Has at least one tag. |
 | `+UNTAGGED` | Has no tags. |
-| `+SCHEDULED` | Is an event (has `dtstart`). |
 | `+TODO` / `+EVENT` | Type selector (alias of `type:todo` / `type:event`). |
 
 Negated forms (`-OVERDUE`, `-PENDING`, …) invert the match.

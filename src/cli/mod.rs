@@ -107,7 +107,7 @@ FILTER GRAMMAR (shared by CLI args and report `filter`)
   date:<day> (unified: todo→due, event→dtstart) + date.before:/date.by:/date.after:
   from:<day> exact | from.before:/from.by:/from.after:  (events' dtstart only)
   status:pending|in-progress|completed|cancelled|recurring|active
-  +OVERDUE +PENDING +COMPLETED +CANCELLED +IN-PROCESS +STARTED +TAGGED +UNTAGGED +SCHEDULED +PARENT  +tag / -tag
+  +OVERDUE +PENDING +DUE +COMPLETED +CANCELLED +IN-PROCESS +STARTED +TAGGED +UNTAGGED +PARENT  +tag / -tag
   Composition: adjacent atoms = and; `and` binds tighter than `or`:
     A B or C D     = (A and B) or (C and D)
     (A or B) C     = (A or B) and C

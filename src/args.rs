@@ -316,7 +316,6 @@ fn is_virtual_tag(l: &str) -> bool {
             | "pending"
             | "completed"
             | "done"
-            | "active"
             | "cancelled"
             | "canceled"
             | "in-progress"
@@ -326,7 +325,7 @@ fn is_virtual_tag(l: &str) -> bool {
             | "started"
             | "tagged"
             | "untagged"
-            | "scheduled"
+            | "due"
             | "todo"
             | "event"
             | "parent"
@@ -446,7 +445,7 @@ mod tests {
         ]);
         assert_eq!(q.cmd, Some(Command::Add));
         assert_eq!(q.text, "buy milk");
-        assert_eq!(q.priority, Some(9));
+        assert_eq!(q.priority, Some(1));
         assert_eq!(q.tags, vec!["home", "urgent"]);
         assert!(q.due.is_some());
     }
@@ -510,7 +509,7 @@ mod tests {
         assert_eq!(q.cmd, Some(Command::Modify));
         assert_eq!(q.ids, vec!["1"]);
         assert_eq!(q.text, "new content");
-        assert_eq!(q.priority, Some(1));
+        assert_eq!(q.priority, Some(9));
         assert_eq!(q.anti_tags, vec!["bar"]);
     }
 
@@ -575,7 +574,7 @@ mod tests {
 
     #[test]
     fn add_does_not_treat_virtual_tags_as_literal_tags() {
-        let q = p(&["add", "x", "+overdue", "+home", "-scheduled"]);
+        let q = p(&["add", "x", "+overdue", "+home", "-due"]);
         assert_eq!(q.tags, vec!["home"]);
         assert!(q.anti_tags.is_empty());
     }

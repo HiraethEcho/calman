@@ -46,7 +46,7 @@ pub enum Flag {
     Started,
     Tagged,
     Untagged,
-    Scheduled,
+    Due,
     Parent,
     Waiting,
 }
@@ -170,10 +170,13 @@ impl Filter {
     }
 }
 
-/// True when the task's date has passed and it is not done (recurring
-/// templates excluded — they are not real instances).
+/// True when a VTODO's due has passed and it is not done (recurring
+/// templates excluded — they are not real instances). Events never match.
 pub fn is_overdue(t: &Task) -> bool {
-    let Some(d) = task_date(t) else {
+    if t.is_event() {
+        return false;
+    }
+    let Some(d) = t.due else {
         return false;
     };
     if !t.status.is_active() {
@@ -199,7 +202,7 @@ fn flag_matches(f: Flag, t: &Task) -> bool {
         Flag::Started => t.started_at.is_some(),
         Flag::Tagged => !t.tags.is_empty(),
         Flag::Untagged => t.tags.is_empty(),
-        Flag::Scheduled => t.is_event(),
+        Flag::Due => !t.is_event() && t.due.is_some(),
         Flag::Parent => t.is_parent(),
         Flag::Waiting => t
             .wait
@@ -517,8 +520,7 @@ fn parse_positive(tok: &str) -> Result<Expr> {
 fn virtual_flag(lname: &str) -> Option<Flag> {
     match lname {
         "overdue" => Some(Flag::Overdue),
-        // `active` is an alias of `pending` (both = not done).
-        "active" | "pending" => Some(Flag::Pending),
+        "pending" => Some(Flag::Pending),
         "completed" | "done" => Some(Flag::Completed),
         "cancelled" | "canceled" => Some(Flag::Cancelled),
         "in-progress" | "inprogress" | "in-process" | "inprocess" => {
@@ -527,7 +529,7 @@ fn virtual_flag(lname: &str) -> Option<Flag> {
         "started" => Some(Flag::Started),
         "tagged" => Some(Flag::Tagged),
         "untagged" => Some(Flag::Untagged),
-        "scheduled" => Some(Flag::Scheduled),
+        "due" => Some(Flag::Due),
         "parent" => Some(Flag::Parent),
         "waiting" => Some(Flag::Waiting),
         _ => None,
@@ -770,17 +772,60 @@ mod tests {
     }
 
     #[test]
-    fn active_alias_and_negated_due() {
-        let e = parse_expr_str("+active").unwrap();
-        assert!(e.matches(&Task::new("work", "x")));
-        let e2 = parse_expr_str("-active").unwrap();
-        assert!(!e2.matches(&Task::new("work", "x")));
+    fn negated_due() {
         // Not(due.after:now): a past-due todo satisfies it.
         let e3 = parse_expr_str("-due.after:now").unwrap();
         assert!(e3.matches(&todo(10)));
         // Not(priority:H)
         let e4 = parse_expr_str("-priority:H").unwrap();
         assert!(e4.matches(&Task::new("work", "x")));
+    }
+
+    #[test]
+    fn active_alias_removed_is_a_literal_tag() {
+        // `+ACTIVE` is no longer a virtual alias of `+PENDING`; it is a tag.
+        let e = parse_expr_str("+active").unwrap();
+        assert!(!e.matches(&Task::new("work", "x")));
+        let mut tagged = Task::new("work", "x");
+        tagged.tags = vec!["active".into()];
+        assert!(e.matches(&tagged));
+    }
+
+    #[test]
+    fn due_flag_matches_todos_with_due_only() {
+        let e = parse_expr_str("+DUE").unwrap();
+        assert!(e.matches(&todo(10)));
+        assert!(!e.matches(&Task::new("work", "bare"))); // no due
+        assert!(!e.matches(&future_event())); // events have dtstart, not due
+        // negation
+        let ne = parse_expr_str("-DUE").unwrap();
+        assert!(!ne.matches(&todo(10)));
+        assert!(ne.matches(&Task::new("work", "bare")));
+    }
+
+    #[test]
+    fn overdue_only_matches_todos() {
+        let o = parse_expr_str("+OVERDUE").unwrap();
+        // A VTODO with a past due matches.
+        assert!(o.matches(&todo(10)));
+        // A todo with a future due does not.
+        let mut future = todo(0);
+        future.due = Some(Utc::now() + Duration::days(1));
+        assert!(!o.matches(&future));
+        // Events never match, even with a past dtstart.
+        let mut past_event = future_event();
+        past_event.dtstart = Some(Utc::now() - Duration::days(1));
+        assert!(!o.matches(&past_event));
+    }
+
+    #[test]
+    fn scheduled_alias_removed_is_a_literal_tag() {
+        // `+SCHEDULED` is no longer a virtual tag; it is a literal tag.
+        let e = parse_expr_str("+scheduled").unwrap();
+        assert!(!e.matches(&future_event()));
+        let mut tagged = future_event();
+        tagged.tags = vec!["scheduled".into()];
+        assert!(e.matches(&tagged));
     }
 
     #[test]
