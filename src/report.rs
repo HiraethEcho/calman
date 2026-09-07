@@ -600,7 +600,7 @@ fn sort_val(r: &Row, field: &str) -> SVal {
             }
             .unwrap_or(i64::MAX),
         ),
-        "pri" => SVal::Num(t.priority.unwrap_or(0) as i64),
+        "pri" => SVal::Num(t.priority.unwrap_or(7) as i64),
         "recur" | "recurrence" => SVal::Str(
             t.rrule
                 .as_deref()
@@ -828,6 +828,32 @@ mod tests {
         let mut rows: Vec<&Row> = vec![&b, &a, &c];
         sort_rows(&mut rows, &[parse_sort("id+")]);
         assert_eq!(rows.iter().map(|r| r.id).collect::<Vec<_>>(), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn priority_sort_places_no_priority_between_m_and_l() {
+        let mut h = row(1, "h");
+        h.task.priority = Some(1);
+        let mut m = row(2, "m");
+        m.task.priority = Some(5);
+        let none = row(3, "none"); // no priority
+        let mut l = row(4, "l");
+        l.task.priority = Some(9);
+
+        // asc: H(1) < M(5) < none(7) < L(9)
+        let mut rows: Vec<&Row> = vec![&l, &none, &m, &h];
+        sort_rows(&mut rows, &[parse_sort("pri+")]);
+        assert_eq!(
+            rows.iter().map(|r| r.id).collect::<Vec<_>>(),
+            vec![1, 2, 3, 4]
+        );
+
+        // desc: L(9) > none(7) > M(5) > H(1)
+        sort_rows(&mut rows, &[parse_sort("pri-")]);
+        assert_eq!(
+            rows.iter().map(|r| r.id).collect::<Vec<_>>(),
+            vec![4, 3, 2, 1]
+        );
     }
 
     #[test]

@@ -175,6 +175,7 @@ Minimal build: `--no-default-features --features storage-ics,date-ical`.
 - [x] Remove `ACTIVE` alias for `PENDING` (`+ACTIVE` → literal tag; `status:active` kept).
 - [x] Remove the `scheduled` row rule from `[colorscheme]` (priority list + `rules`) in `config.default.toml`, `colorscheme.example.toml`, `src/report.rs` `DEFAULT_PRIORITY`/`rule_matches`, and docs.
 - [x] Fix priority test expectations: `priority:H → 1`, `pri:L → 9` (matching `priority_from_str`).
+- [x] `pri` sort: no-priority items sort between `M`(5) and `L`(9) via a sort-only sentinel (nothing written to ICS/JSONL).
 - [x] Update help/README/docs (`filters.md`, `reports.md`) + `SPEC.md` decision + tests.
 
 ---

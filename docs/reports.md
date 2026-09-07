@@ -69,6 +69,11 @@ sort = ["status-", "pri-", "due+"]
 sort = ["due+", "created+/"]   # break between different due days
 ```
 
+When sorting by `pri`, items **without** a priority sort between `M` and `L`:
+ascending `H(1) < M(5) < none < L(9)` (and the reverse descending). This is a
+sort-only convention — nothing is written to storage, so iOS/CalDAV never sees
+a priority for those items.
+
 ## Defining custom reports
 
 Add a `[report.<name>]` table in `config.toml` (or an included file). Any name
