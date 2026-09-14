@@ -14,6 +14,22 @@ calman add "standup" due:eod recur:daily count:5   # count:/until: may be separa
 
 Recurrence applies to **both todos and events**.
 
+### iPhone / Apple 兼容提示 (iOS interop)
+
+Apple clients (iPhone Reminders/Calendar) **do not understand `COUNT=`** — they
+can only end a series with a date (`UNTIL`). So for a series that must repeat
+correctly on iOS, write `until:<last-day>` instead of `count:<n>`:
+
+```sh
+# 在 iPhone 上会失效：iOS 不认 COUNT
+calman add "take med" recur:daily count:3 due:20260914
+# 用 until 明确最后一天（含当天，共 3 次）
+calman add "take med" recur:daily until:20260916 due:20260914
+```
+
+All-day series keep `UNTIL=YYYYMMDD` (exactly what iOS writes); timed series
+are rendered as a UTC datetime so iPhone parses them.
+
 ## Two input styles
 
 ### 1. Raw passthrough
@@ -130,10 +146,10 @@ sequential IDs (Taskwarrior-style), and `id.n` / `on:<date>` remain valid
 aliases:
 
 ```
-calman done 5                     # complete the 5th row (an expanded occurrence) → Completed override record
+calman done 5                     # complete the 5th row (an expanded occurrence) → iOS-style: standalone COMPLETED copy + master rolls DUE forward
 calman done 5.2                  # complete the 2nd upcoming occurrence of series 5
 calman done 5 on:2026-09-02      # complete the occurrence starting that day
-calman delete 5.2                # delete one occurrence → EXDATE (skip that instance)
+calman delete 5.2                # delete one occurrence → EXDATE (skip that instance) + master rolls forward
 calman modify 5.1 summary:x      # override 1st occurrence → RECURRENCE-ID sibling
 calman info 5.2                  # full details of that occurrence
 

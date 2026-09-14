@@ -208,10 +208,9 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
     if let Some(c) = task.completed_at {
         props.push(format!("COMPLETED:{}", dt(c)));
     }
-    // VTODO has no DTSTART/DTEND per RFC 5545 — only VEVENT writes them.
-    if task.event
-        && let Some(d) = task.dtstart
-    {
+    // DTSTART is legal on VTODO too (iOS writes it on completed copies);
+    // DTEND stays VEVENT-only (VTODO has no DTEND per RFC 5545).
+    if let Some(d) = task.dtstart {
         props.push(ics_date_prop("DTSTART", d, task.allday, tz));
     }
     if task.event
@@ -220,6 +219,14 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
         props.push(ics_date_prop("DTEND", d, task.allday, tz));
     }
     if let Some(r) = &task.rrule {
+        // Apple/iOS reject a DATE-only `UNTIL` on timed series (RFC 5545
+        // wants a DATETIME UNTIL matching the DATETIME DTSTART); all-day
+        // keeps the DATE form, exactly like iOS writes it.
+        let r = if task.allday {
+            r.clone()
+        } else {
+            crate::recurrence::rrule_with_until_datetime(r)
+        };
         props.push(format!("RRULE:{r}"));
     }
     // Emit EXDATE for each excluded occurrence.
@@ -761,10 +768,11 @@ mod tests {
         let t = parse_ics(content).unwrap();
         assert!(!t.event);
         assert!(!t.is_event());
-        // ...and renders back as VTODO without DTSTART.
+        // ...and renders back as VTODO keeping its DTSTART (iOS writes
+        // DTSTART on VTODOs, e.g. completed occurrence copies).
         let out = render_ics(&t, chrono_tz::Tz::Asia__Shanghai).unwrap();
         assert!(out.contains("BEGIN:VTODO"));
-        assert!(!out.contains("DTSTART"));
+        assert!(out.contains("DTSTART;TZID=Asia/Shanghai"));
         assert!(out.contains("DUE;TZID=Asia/Shanghai"));
     }
 

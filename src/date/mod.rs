@@ -4,7 +4,9 @@
 //! `date-natural` (optional) adds natural-language parsing via `interim` and
 //! NL-recurrence parsing via `text2rrule`, exposed through `natural`.
 
-pub use ical::{DateValue, local_midnight, parse_datetime, parse_duration, resolve_end};
+pub use ical::{
+    DateValue, local_midnight, local_to_utc, parse_datetime, parse_duration, resolve_end,
+};
 
 #[cfg(feature = "date-ical")]
 mod ical;

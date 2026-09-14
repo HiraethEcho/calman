@@ -85,11 +85,15 @@ RECURRENCE (recur: / repeat:)  → standard RFC 5545 RRULE
                      (`count:`/`until:` may be separate tokens: recur:daily count:5)
   e.g. every tuesday and friday for 7 weeks
        → FREQ=WEEKLY;BYDAY=TU,FR;COUNT=14
+  Apple/iOS note: iPhone Reminders only understands UNTIL, not COUNT —
+  use `until:<last-day>` (or `until:eom`/`until:eoy`) instead of `count:`
+  when the series must repeat correctly on iOS.
   series model     : master = status:recurring, virtual tag +PARENT
                      hidden from ls/list/next by default (show: `+PARENT`)
-  occurrences      : done <id> on:<date> → Completed override record
-                     delete <id> on:<date> → EXDATE (skip one)
-                     modify <id>.<n> … → RECURRENCE-ID override (same UID)
+  occurrences      : done <id> on:<date> → iOS-style: standalone COMPLETED copy
+                     + master rolls DUE/DTSTART to next occurrence
+                     delete <id> on:<date> → EXDATE (skip one) + master rolls forward
+                     modify <id>.<n> … → RECURRENCE-ID override (same UID, no roll)
                      expanded rows carry plain IDs; `done 5` targets one occurrence
                      `all-future` keyword on modify/delete an occurrence:
                        modify → split series (old keeps past, new edited series starts here)
@@ -373,8 +377,10 @@ fn expand_occurrences(rows: &mut Vec<Row>, conf: &Config) {
 }
 
 /// Build a per-occurrence override sibling: same UID family, `recurrence_id`
-/// = the occurrence's original DTSTART, acting as a completed or edited
-/// replacement instance. Used by `done` (Completed) and `modify` (Pending).
+/// = the occurrence's original DTSTART, acting as a modified replacement
+/// instance. Used by `modify <id>.<n>` (RECURRENCE-ID exception, iOS-style
+/// edit semantics). Completion no longer uses this path — see
+/// [`completed_occurrence_copy`].
 pub fn override_for_occurrence(
     master: &Task,
     occ: DateTime<Utc>,
@@ -398,6 +404,96 @@ pub fn override_for_occurrence(
     ov.created_at = now;
     ov.updated_at = now;
     ov
+}
+
+/// iOS-style completed copy of a single occurrence (what iPhone writes when
+/// you complete a recurring item — observed in the CalDAV store):
+/// a **standalone** VTODO with its own new UID, no `RECURRENCE-ID`, no
+/// parent link, no RRULE, dated at the instance (`DTSTART` + `DUE`), with
+/// `STATUS:COMPLETED`, `COMPLETED` timestamp and `PERCENT-COMPLETE:100`.
+/// Because it is not structurally linked, CalDAV clients (Reminders) render
+/// it correctly instead of choking on a RECURRENCE-ID override.
+pub fn completed_occurrence_copy(master: &Task, occ: DateTime<Utc>) -> Task {
+    let mut c = master.clone();
+    c.uid = uuid::Uuid::new_v4().to_string();
+    c.parent_uid = None;
+    c.recurrence_id = None;
+    c.rrule = None;
+    c.exdates = Vec::new();
+    c.wait = None;
+    c.started_at = None;
+    c.alarm_before = None;
+    c.status = TaskStatus::Completed;
+    c.percent_complete = Some(100);
+    let now = chrono::Utc::now();
+    c.completed_at = Some(now);
+    c.created_at = now;
+    c.updated_at = now;
+    if master.is_event() {
+        let delta = occ - master.dtstart.unwrap_or(occ);
+        c.dtstart = Some(occ);
+        c.dtend = master.dtend.map(|e| e + delta);
+        c.due = None;
+    } else {
+        c.due = Some(occ);
+        // iOS writes DTSTART alongside DUE on completed copies.
+        c.dtstart = Some(occ);
+        c.dtend = None;
+    }
+    c
+}
+
+/// Next occurrence of `master` strictly after `after`, per its RRULE
+/// (recur-expand feature). `None` when the series has ended or no expansion
+/// is compiled in.
+pub fn next_occurrence_after(master: &Task, after: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    #[cfg(feature = "recur-expand")]
+    {
+        crate::recur_expand::expand_task(
+            master,
+            after + chrono::Duration::seconds(1),
+            after + chrono::Duration::days(366),
+        )
+        .into_iter()
+        .next()
+        .map(|o| o.occurrence_start)
+    }
+    #[cfg(not(feature = "recur-expand"))]
+    {
+        let _ = (master, after);
+        None
+    }
+}
+
+/// iOS-style master roll: advance the master's anchor (todo `DUE`;
+/// event `DTSTART` + `DTEND`) to the next occurrence after `occ`, so the
+/// master always points at the *next* upcoming instance — exactly what
+/// iPhone does when an instance is completed or deleted. Returns `true` if
+/// the anchor moved (no-op when `occ` is before the current anchor or the
+/// series is over).
+pub fn roll_master_to(master: &mut Task, occ: DateTime<Utc>) -> bool {
+    let roll = match master.dtstart.or(master.due) {
+        // 展开按秒截断，而存储锚点可能带纳秒：容忍 1 秒差，避免 `occ` 永远
+        // 小于锚点导致不滚动。Expansion truncates to seconds; the stored
+        // anchor may carry nanoseconds, so allow a 1-second tolerance.
+        Some(a) => occ >= a - chrono::Duration::seconds(1),
+        None => false,
+    };
+    if !roll {
+        return false;
+    }
+    let Some(next) = next_occurrence_after(master, occ) else {
+        return false;
+    };
+    if master.is_event() {
+        let delta = next - master.dtstart.unwrap_or(next);
+        master.dtstart = Some(next);
+        master.dtend = master.dtend.map(|e| e + delta);
+    } else {
+        master.due = Some(next);
+    }
+    master.updated_at = chrono::Utc::now();
+    true
 }
 
 /// A resolved target that may address a single occurrence of a recurring series.
@@ -773,6 +869,55 @@ mod tests {
             .map(|r| r.id)
             .collect();
         assert_eq!(shown, vec![1, 3]);
+    }
+
+    #[cfg(feature = "recur-expand")]
+    #[test]
+    fn completed_copy_is_standalone_ios_style() {
+        use chrono::{Duration, Utc};
+        let mut master = Task::new("work", "daily");
+        let anchor = Utc::now() + Duration::days(1);
+        master.due = Some(anchor);
+        master.rrule = Some("FREQ=DAILY".into());
+        master.status = TaskStatus::Recurring;
+        master.tags = vec!["home".into()];
+
+        let copy = super::completed_occurrence_copy(&master, anchor);
+        assert_ne!(copy.uid, master.uid);
+        assert!(copy.parent_uid.is_none());
+        assert!(copy.recurrence_id.is_none());
+        assert!(copy.rrule.is_none());
+        assert!(copy.exdates.is_empty());
+        assert!(copy.wait.is_none());
+        assert_eq!(copy.status, TaskStatus::Completed);
+        assert_eq!(copy.percent_complete, Some(100));
+        assert_eq!(copy.due, Some(anchor));
+        assert_eq!(copy.dtstart, Some(anchor)); // iOS writes DTSTART alongside DUE
+        assert!(copy.completed_at.is_some());
+        assert_eq!(copy.tags, vec!["home"]); // content is inherited
+    }
+
+    #[cfg(feature = "recur-expand")]
+    #[test]
+    fn roll_advances_anchor_to_next_occurrence() {
+        use chrono::{Duration, Utc};
+        use chrono::Timelike;
+        let mut master = Task::new("work", "daily");
+        // Expansion truncates to seconds, so start from a second-aligned anchor.
+        let now = Utc::now().with_nanosecond(0).unwrap();
+        let anchor = now + Duration::days(1);
+        master.due = Some(anchor);
+        master.rrule = Some("FREQ=DAILY".into());
+        master.status = TaskStatus::Recurring;
+
+        assert!(super::roll_master_to(&mut master, anchor));
+        assert_eq!(master.due, Some(anchor + Duration::days(1)));
+
+        // Completing/deleting an occurrence BEFORE the anchor must not move it.
+        let mut m2 = master.clone();
+        let before = anchor - Duration::days(5);
+        assert!(!super::roll_master_to(&mut m2, before));
+        assert_eq!(m2.due, Some(anchor + Duration::days(1)));
     }
 }
 

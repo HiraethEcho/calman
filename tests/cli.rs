@@ -156,3 +156,50 @@ fn modify_date_only_start_becomes_allday() {
     assert!(line.contains("\"dtend\":null"), "expected dtend cleared: {line}");
 }
 
+#[cfg(feature = "recur-expand")]
+#[test]
+fn done_occurrence_writes_ios_style_completed_copy_and_rolls_master() {
+    let dir = tempdir().unwrap();
+    let home = dir.path();
+
+    // Timed recurring todo anchored at +2d (FREQ=DAILY).
+    assert!(calman(home, &["add", "week", "recur:daily", "due:+2d"]).1);
+    let (out, ok) = calman(home, &["list"]);
+    assert!(ok, "list failed: {out}");
+    let id = strip_ansi(&out)
+        .lines()
+        .find(|l| l.contains("week"))
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+    assert!(calman(home, &["done", &id]).1, "done {id} failed");
+
+    let jsonl = std::fs::read_to_string(home.join(".local/share/calman/work/tasks.jsonl")).unwrap();
+    let rows: Vec<serde_json::Value> = jsonl
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+
+    // Master: keeps RRULE, its anchor (due) advanced by exactly one day.
+    let master = rows
+        .iter()
+        .find(|r| r["rrule"].as_str().is_some())
+        .expect("master row");
+    // Completed copy: standalone, iOS-style.
+    let copy = rows
+        .iter()
+        .find(|r| r["status"] == "completed" && r["rrule"].is_null())
+        .expect("completed copy");
+    assert!(copy["recurrence_id"].is_null(), "no RECURRENCE-ID");
+    assert!(copy["parent_uid"].is_null(), "standalone, no parent link");
+    assert_eq!(copy["percent_complete"], 100);
+    assert!(copy["dtstart"].is_string(), "DTSTART written on the copy");
+
+    let copy_due = chrono::DateTime::parse_from_rfc3339(copy["due"].as_str().unwrap()).unwrap();
+    let master_due =
+        chrono::DateTime::parse_from_rfc3339(master["due"].as_str().unwrap()).unwrap();
+    assert_eq!(master_due - copy_due, chrono::Duration::days(1));
+}
+

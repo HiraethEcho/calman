@@ -12,8 +12,34 @@
 #[cfg(feature = "date-natural")]
 use crate::date::{DateValue, parse_date_value};
 use anyhow::{Result, bail};
+use chrono::NaiveDate;
 #[cfg(feature = "date-natural")]
-use chrono::{Datelike, Local, NaiveDate};
+use chrono::{Datelike, Local};
+
+/// Convert a DATE-only `UNTIL` (`20260930`) into the UTC instant of its local
+/// end-of-day (`20260930T155959Z` on UTC+8). RFC 5545 wants a DATETIME `UNTIL`
+/// when the series `DTSTART` is a DATETIME, and both the `rrule` crate and
+/// iOS reject the mixed form — so keep DATE for all-day (like iOS writes),
+/// and rewrite it for timed series. Returns `None` for non-8-digit input.
+pub fn until_local_end(until: &str) -> Option<String> {
+    let nd = NaiveDate::parse_from_str(until, "%Y%m%d").ok()?;
+    let end = crate::date::local_to_utc(nd.and_hms_opt(23, 59, 59)?);
+    Some(end.format("%Y%m%dT%H%M%SZ").to_string())
+}
+
+/// Rewrite a DATE-only `UNTIL=` inside an RRULE to the UTC instant of its
+/// local end-of-day (see [`until_local_end`]); every other part passes through.
+pub fn rrule_with_until_datetime(rrule: &str) -> String {
+    rrule.split(';')
+        .map(|p| match p.strip_prefix("UNTIL=") {
+            Some(u) if u.len() == 8 && u.chars().all(|c| c.is_ascii_digit()) => {
+                until_local_end(u).map_or_else(|| p.to_string(), |v| format!("UNTIL={v}"))
+            }
+            _ => p.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(";")
+}
 
 /// Map a weekday token to its `BYDAY` code.
 #[cfg(feature = "date-natural")]
@@ -410,5 +436,31 @@ mod iso_tests {
         assert_eq!(rrule_period("FREQ=MONTHLY;INTERVAL=3"), "P3M");
         assert_eq!(rrule_period("FREQ=YEARLY"), "P1Y");
         assert_eq!(rrule_period("garbage"), "garbage");
+    }
+
+    #[test]
+    fn until_local_end_is_utc_end_of_local_day() {
+        // 2026-09-30 23:59:59 本地时间转成 UTC 后必须是带 Z 的 datetime
+        // （具体时刻随机器时区变化，这里只校验形状）。
+        let v = until_local_end("20260930").unwrap();
+        assert_eq!(v.len(), 16); // YYYYMMDDTHHMMSSZ
+        assert!(v.ends_with('Z'));
+        assert!(v.starts_with("20260930T"));
+        // 非 8 位日期原样返回 None。
+        assert!(until_local_end("garbage").is_none());
+        assert!(until_local_end("20260930T090000Z").is_none());
+    }
+
+    #[test]
+    fn rrule_with_until_datetime_rewrites_date_only_until() {
+        let v = rrule_with_until_datetime("FREQ=DAILY;UNTIL=20260930");
+        assert!(v.starts_with("FREQ=DAILY;UNTIL=20260930T"), "got {v}");
+        assert!(v.ends_with('Z'));
+        // 已带时间的 UNTIL 与其它部分原样保留。
+        assert_eq!(
+            rrule_with_until_datetime("FREQ=WEEKLY;BYDAY=TU,FR;UNTIL=20260930T000000Z"),
+            "FREQ=WEEKLY;BYDAY=TU,FR;UNTIL=20260930T000000Z"
+        );
+        assert_eq!(rrule_with_until_datetime("FREQ=DAILY;COUNT=3"), "FREQ=DAILY;COUNT=3");
     }
 }

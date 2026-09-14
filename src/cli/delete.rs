@@ -89,6 +89,9 @@ pub fn run(conf: &Config, q: &ParsedArgs) -> Result<()> {
                 if !t.exdates.contains(&occ) {
                     t.exdates.push(occ);
                 }
+                // iOS 式：删掉一次实例后，母任务锚点同样滚动到下一次。
+                // Roll the master anchor forward, like iOS does after delete.
+                crate::cli::roll_master_to(t, occ);
                 Ok(())
             })?
             .ok_or_else(|| anyhow::anyhow!("task `{}` disappeared", tgt.uid))?;

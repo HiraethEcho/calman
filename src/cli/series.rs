@@ -131,4 +131,31 @@ mod tests {
         assert_eq!(t2.rrule.as_deref(), Some("FREQ=WEEKLY;COUNT=2"));
         assert!(truncate_before(&mut t, dt(2026, 9, 1, 9)).unwrap()); // 1st occ
     }
+
+    #[cfg(feature = "recur-expand")]
+    #[test]
+    fn until_series_truncates_to_count() {
+        // UNTIL 序列截断 = 换算成 COUNT（相对 DTSTART 的前 N-1 次），
+        // 与 iOS/calman 的 DATE-only UNTIL 都兼容。
+        let mut t = Task::new("work", "series");
+        t.dtstart = Some(dt(2026, 9, 14, 9));
+        t.rrule = Some("FREQ=DAILY;UNTIL=20260930".into());
+        let mut t2 = t.clone();
+        assert!(!truncate_before(&mut t2, dt(2026, 9, 16, 9)).unwrap()); // 3rd day
+        assert_eq!(t2.rrule.as_deref(), Some("FREQ=DAILY;COUNT=2"));
+        // 首个 occurrence 截断 → 删除母任务。
+        assert!(truncate_before(&mut t, dt(2026, 9, 14, 9)).unwrap());
+    }
+
+    #[cfg(feature = "recur-expand")]
+    #[test]
+    fn absolute_index_counts_until_series_with_exdates() {
+        let mut t = Task::new("work", "series");
+        t.dtstart = Some(dt(2026, 9, 14, 9));
+        t.rrule = Some("FREQ=DAILY;UNTIL=20260930".into());
+        t.exdates = vec![dt(2026, 9, 15, 9)];
+        // 09-14=1，09-15 被 EXDATE（仍占一个槽位），09-16=3。
+        assert_eq!(absolute_index(&t, dt(2026, 9, 16, 9)), Some(3));
+        assert_eq!(absolute_index(&t, dt(2026, 9, 30, 9)), Some(17));
+    }
 }
