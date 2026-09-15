@@ -1,7 +1,11 @@
-//! ICS storage backend (one `<UID>.ics` per task; VTODO/VEVENT).
+//! ICS storage backend — 每个资源保存为一个 `<UID>.ics`（VTODO/VEVENT）。
+//! (ICS storage backend: one resource per `<UID>.ics`.)
 //!
-//! Layout per DESIGN.md §2.2.B. Field mapping is a minimal but standard
-//! iCalendar serialization covering the core `Task` fields.
+//! 重复系列的单次覆盖（RECURRENCE-ID 异常）采用 **iOS 同文件布局**：
+//! 与母组件写进同一个资源（同 UID、追加组件），而不是独立文件，
+//! 避免“同 UID 多资源”导致的 iPhone 显示冲突。旧式独立覆盖文件仍可读取
+//! （只读兼容，不迁移）。字段映射为最小但标准的 iCalendar 序列化，
+//! 覆盖核心 `Task` 字段。
 
 use super::{Storage, atomic_write};
 use crate::date::local_midnight;
@@ -38,25 +42,53 @@ impl IcsStorage {
                 continue;
             }
             if let Ok(content) = fs::read_to_string(&path) {
-                match parse_ics(&content) {
-                    Ok(mut task) => {
-                        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                            // Master files (no RECURRENCE-ID) win the UID→file
-                            // map: overrides reuse the master's ICS UID and must
-                            // not shadow the master's storage key.
-                            if task.recurrence_id.is_none()
-                                || !uid_to_file.contains_key(&task.uid)
-                            {
-                                uid_to_file.insert(task.uid.clone(), stem.to_string());
-                            }
-                            task.uid = stem.to_string();
-                        }
-                        tasks.push(task);
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    let blocks = split_components(&content);
+                    if blocks.is_empty() {
+                        continue;
                     }
-                    Err(e) => eprintln!(
-                        "warning: skipping unparseable {}: {e}",
-                        path.display()
-                    ),
+                    let mut parts = Vec::new();
+                    for b in blocks {
+                        match parse_ics(&b) {
+                            Ok(t) => parts.push(t),
+                            Err(e) => eprintln!(
+                                "warning: skipping unparseable {}: {e}",
+                                path.display()
+                            ),
+                        }
+                    }
+                    if parts.is_empty() {
+                        continue;
+                    }
+                    // 同文件内存在母组件（无 RECURRENCE-ID）时，异常组件属于
+                    // 同一资源（iOS 布局）；否则是旧式独立覆盖文件。
+                    let master_uids: std::collections::HashSet<String> = parts
+                        .iter()
+                        .filter(|t| t.recurrence_id.is_none())
+                        .map(|t| t.uid.clone())
+                        .collect();
+                    for mut t in parts {
+                        let in_file_uid = t.uid.clone();
+                        if t.recurrence_id.is_some() && master_uids.contains(&in_file_uid) {
+                            // iOS 式同文件异常：存储键 = 母文件 stem + "#" + RECURRENCE-ID。
+                            // Grouped exception: derived storage key.
+                            let rid = t.recurrence_id
+                                .map(|r| r.format("%Y%m%dT%H%M%SZ").to_string())
+                                .unwrap();
+                            t.uid = format!("{stem}#{rid}");
+                        } else {
+                            t.uid = stem.to_string(); // 母组件或旧式独立覆盖文件
+                        }
+                        // Master files (no RECURRENCE-ID) win the UID→file
+                        // map: overrides reuse the master's ICS UID and must
+                        // not shadow the master's storage key.
+                        if t.recurrence_id.is_none()
+                            || !uid_to_file.contains_key(&in_file_uid)
+                        {
+                            uid_to_file.insert(in_file_uid, stem.to_string());
+                        }
+                        tasks.push(t);
+                    }
                 }
             }
         }
@@ -77,6 +109,27 @@ impl IcsStorage {
     fn file_for(&self, uid: &str) -> PathBuf {
         self.dir.join(format!("{uid}.ics"))
     }
+
+    /// 重写母任务文件：母组件 + 按日期排序的全部异常组件（同一 UID）。
+    /// Rewrite the master's resource: the master plus every exception.
+    /// （不是 Storage trait 的成员：内部按“资源组”写盘用。）
+    fn write_group(&self, master_uid: &str) -> Result<()> {
+        let mut group: Vec<Task> = self
+            .tasks
+            .iter()
+            .filter(|t| {
+                t.uid == master_uid
+                    || (t.parent_uid.as_deref() == Some(master_uid)
+                        && t.recurrence_id.is_some())
+            })
+            .cloned()
+            .collect();
+        group.sort_by_key(|t| t.recurrence_id);
+        atomic_write(
+            &self.file_for(master_uid),
+            render_calendar(&group, self.tz)?.as_bytes(),
+        )
+    }
 }
 
 impl Storage for IcsStorage {
@@ -85,6 +138,19 @@ impl Storage for IcsStorage {
     }
 
     fn add(&mut self, task: Task) -> Result<()> {
+        let mut task = task;
+        if let Some(pid) = task.parent_uid.clone() {
+            // 异常组件（RECURRENCE-ID 覆盖）：写进母任务的文件，与 iOS 布局一致。
+            // The exception lands inside the master's file (iOS layout).
+            let rid = task
+                .recurrence_id
+                .map(|r| r.format("%Y%m%dT%H%M%SZ").to_string())
+                .ok_or_else(|| anyhow::anyhow!("override missing RECURRENCE-ID"))?;
+            task.uid = format!("{pid}#{rid}"); // 派生存储键，保证重载后一致
+            self.tasks.push(task);
+            self.write_group(&pid)?;
+            return Ok(());
+        }
         atomic_write(&self.file_for(&task.uid), render_ics(&task, self.tz)?.as_bytes())?;
         self.tasks.push(task);
         Ok(())
@@ -101,7 +167,10 @@ impl Storage for IcsStorage {
         f(t)?;
         t.updated_at = Utc::now();
         let t = &self.tasks[pos];
-        atomic_write(&self.file_for(uid), render_ics(t, self.tz)?.as_bytes())?;
+        // 异常或母任务更新都重写整组（母 + 异常，同一文件）。
+        // Any member update rewrites the whole grouped resource.
+        let group_owner = t.parent_uid.as_deref().unwrap_or(uid);
+        self.write_group(group_owner)?;
         Ok(Some(t.clone()))
     }
 
@@ -110,9 +179,14 @@ impl Storage for IcsStorage {
             return Ok(None);
         };
         let removed = self.tasks.remove(pos);
-        let path = self.file_for(uid);
-        if path.exists() {
-            fs::remove_file(&path)?;
+        if let Some(pid) = &removed.parent_uid {
+            // 删除异常组件：重写母文件（不再包含该组件）。
+            self.write_group(pid)?;
+        } else {
+            let path = self.file_for(uid);
+            if path.exists() {
+                fs::remove_file(&path)?;
+            }
         }
         Ok(Some(removed))
     }
@@ -147,14 +221,45 @@ fn fold(line: &str) -> String {
     out
 }
 
-/// Render a task as a full VCALENDAR document.
+/// Render a task as a full VCALENDAR document (one component per file).
+/// 单个资源 = 一个 VCALENDAR，包含一个组件（旧式独立文件布局）。
 pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
-    let mut lines = String::new();
-    lines.push_str("BEGIN:VCALENDAR\r\n");
-    lines.push_str("VERSION:2.0\r\n");
-    lines.push_str("CALSCALE:GREGORIAN\r\n");
-    lines.push_str("PRODID:-//calman//calman//EN\r\n");
+    let mut out = String::new();
+    calendar_header(&mut out);
+    out.push_str(&render_component(task, tz)?);
+    out.push_str("END:VCALENDAR\r\n");
+    Ok(out)
+}
 
+/// Render ONE VCALENDAR resource holding a master and its RECURRENCE-ID
+/// exceptions (master first, then exceptions by date) — the exact layout
+/// iPhone writes, so calman's overrides no longer duplicate the master UID
+/// in a separate file.
+/// 渲染一个资源 = 母组件 + 全部异常组件（iOS 同文件布局）。
+pub fn render_calendar(tasks: &[Task], tz: Tz) -> Result<String> {
+    let mut out = String::new();
+    calendar_header(&mut out);
+    let mut comps: Vec<&Task> = tasks.iter().collect();
+    // Option 排序：None（母组件）排最前，异常按日期升序。
+    comps.sort_by_key(|t| t.recurrence_id);
+    for t in comps {
+        out.push_str(&render_component(t, tz)?);
+    }
+    out.push_str("END:VCALENDAR\r\n");
+    Ok(out)
+}
+
+/// VCALENDAR 包络（头）。
+fn calendar_header(out: &mut String) {
+    out.push_str(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nCALSCALE:GREGORIAN\r\nPRODID:-//calman//calman//EN\r\n",
+    );
+}
+
+/// 渲染单个 VEVENT/VTODO 组件及其属性。
+/// Render a single VEVENT/VTODO component with all its properties.
+fn render_component(task: &Task, tz: Tz) -> Result<String> {
+    let mut lines = String::new();
     let component = if task.event { "VEVENT" } else { "VTODO" };
     lines.push_str(&format!("BEGIN:{component}\r\n"));
 
@@ -260,8 +365,36 @@ pub fn render_ics(task: &Task, tz: Tz) -> Result<String> {
         lines.push_str(&format!("BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT{secs}S\r\nDESCRIPTION:{}\r\nEND:VALARM\r\n", escape_text(&task.summary)));
     }
     lines.push_str(&format!("END:{component}\r\n"));
-    lines.push_str("END:VCALENDAR\r\n");
     Ok(lines)
+}
+
+/// 把一份 VCALENDAR 文本切成顶层组件块（VEVENT/VTODO），供逐组件解析。
+/// Splits a VCALENDAR resource into top-level component blocks so each
+/// VEVENT/VTODO (master + RECURRENCE-ID exceptions, iOS layout) parses
+/// independently. VALARM stays inside its component; VTIMEZONE is skipped.
+/// 基于展开后的逻辑行（unfold），块内用 CRLF 重新拼接。
+fn split_components(content: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let mut cur: Option<Vec<String>> = None;
+    for line in unfold(content) {
+        let up = line.trim_start();
+        if up.starts_with("BEGIN:VEVENT") || up.starts_with("BEGIN:VTODO") {
+            if cur.is_none() {
+                cur = Some(Vec::new());
+            }
+        }
+        if let Some(b) = &mut cur {
+            b.push(line.to_string());
+        }
+        if (up.starts_with("END:VEVENT") || up.starts_with("END:VTODO"))
+            && cur.is_some()
+        {
+            if let Some(b) = cur.take() {
+                blocks.push(b.join("\r\n"));
+            }
+        }
+    }
+    blocks
 }
 
 /// Parse a VCALENDAR document into a `Task`.
@@ -938,6 +1071,120 @@ mod tests {
         // Unstarted tasks carry no property.
         let plain = parse_ics(&render_ics(&make_task(), Tz::UTC).unwrap()).unwrap();
         assert!(plain.started_at.is_none());
+    }
+
+    #[test]
+    fn split_components_splits_ios_style_resource() {
+        // iOS 布局：一个资源里既有母组件又有 RECURRENCE-ID 异常组件。
+        let content = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Apple Inc.//iOS//EN\r\n\
+BEGIN:VTIMEZONE\r\nTZID:Asia/Shanghai\r\nBEGIN:STANDARD\r\nDTSTART:19890917T020000\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n\
+BEGIN:VEVENT\r\nUID:abc\r\nDTSTART;TZID=Asia/Shanghai:20260914T120000\r\n\
+RRULE:FREQ=DAILY;UNTIL=20260920T155959Z\r\nSUMMARY:test\r\nEND:VEVENT\r\n\
+BEGIN:VEVENT\r\nUID:abc\r\nRECURRENCE-ID;TZID=Asia/Shanghai:20260917T120000\r\n\
+DTSTART;TZID=Asia/Shanghai:20260917T120000\r\nDESCRIPTION:Edited on iphone\r\nSUMMARY:test\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let blocks = split_components(content);
+        assert_eq!(blocks.len(), 2);
+        let master = parse_ics(&blocks[0]).unwrap();
+        assert!(master.recurrence_id.is_none());
+        assert_eq!(master.rrule.as_deref(), Some("FREQ=DAILY;UNTIL=20260920T155959Z"));
+        let exc = parse_ics(&blocks[1]).unwrap();
+        assert!(exc.recurrence_id.is_some());
+        assert_eq!(exc.description.as_deref(), Some("Edited on iphone"));
+        assert_eq!(exc.uid, "abc"); // 与母组件同 UID
+        assert_eq!(exc.parent_uid.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn override_writes_into_master_file() {
+        use chrono::TimeZone;
+        let dir = tempdir().unwrap();
+        let mut st = IcsStorage::open(dir.path(), Tz::Asia__Shanghai).unwrap();
+        let mut master = Task::new("work", "series");
+        master.event = true;
+        master.dtstart = Some(Utc.with_ymd_and_hms(2026, 9, 14, 12, 0, 0).unwrap());
+        master.dtend = Some(Utc.with_ymd_and_hms(2026, 9, 14, 14, 0, 0).unwrap());
+        master.rrule = Some("FREQ=DAILY".into());
+        master.status = TaskStatus::Recurring;
+        st.add(master.clone()).unwrap();
+
+        // 构造一次 modify 产生的异常组件（与 override_for_occurrence 同构）。
+        let occ = Utc.with_ymd_and_hms(2026, 9, 17, 12, 0, 0).unwrap();
+        let mut exc = master.clone();
+        exc.uid = uuid::Uuid::new_v4().to_string();
+        exc.parent_uid = Some(master.uid.clone());
+        exc.recurrence_id = Some(occ);
+        exc.rrule = None;
+        exc.exdates = Vec::new();
+        exc.status = TaskStatus::Pending;
+        exc.dtstart = Some(occ);
+        exc.dtend = Some(Utc.with_ymd_and_hms(2026, 9, 17, 14, 0, 0).unwrap());
+        st.add(exc).unwrap();
+
+        // 只有一个文件，且包含两个 VEVENT 组件（iOS 同文件布局）。
+        let files: Vec<_> = fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(files.len(), 1, "override must not create a second file");
+        let content = fs::read_to_string(dir.path().join(format!("{}.ics", master.uid))).unwrap();
+        assert_eq!(content.matches("BEGIN:VEVENT").count(), 2);
+        assert_eq!(content.matches("RECURRENCE-ID").count(), 1);
+        // 同 UID 出现两次（母 + 异常）。
+        let uid_line = format!("UID:{}", master.uid);
+        assert_eq!(content.matches(&uid_line).count(), 2);
+
+        // 重载：母 + 异常两条，异常键为母键 + "#" + RECURRENCE-ID。
+        let st2 = IcsStorage::open(dir.path(), Tz::Asia__Shanghai).unwrap();
+        assert_eq!(st2.list().len(), 2);
+        let ov = st2
+            .list()
+            .iter()
+            .find(|t| t.recurrence_id.is_some())
+            .unwrap();
+        assert_eq!(ov.parent_uid.as_deref(), Some(master.uid.as_str()));
+        assert_eq!(
+            ov.uid,
+            format!("{}#{}", master.uid, occ.format("%Y%m%dT%H%M%SZ"))
+        );
+        let master_re = st2.list().iter().find(|t| t.recurrence_id.is_none()).unwrap();
+        assert_eq!(master_re.rrule.as_deref(), Some("FREQ=DAILY"));
+
+        // 删除异常组件：文件回到只有母组件。
+        let mut st3 = IcsStorage::open(dir.path(), Tz::Asia__Shanghai).unwrap();
+        st3.remove(&ov.uid).unwrap();
+        let content = fs::read_to_string(dir.path().join(format!("{}.ics", master.uid))).unwrap();
+        assert_eq!(content.matches("BEGIN:VEVENT").count(), 1);
+        assert_eq!(content.matches("RECURRENCE-ID").count(), 0);
+    }
+
+    #[test]
+    fn legacy_separate_override_file_still_loads() {
+        use chrono::TimeZone;
+        let dir = tempdir().unwrap();
+        let mut master = Task::new("work", "series");
+        master.rrule = Some("FREQ=DAILY".into());
+        master.status = TaskStatus::Recurring;
+        master.due = Some(Utc.with_ymd_and_hms(2026, 9, 14, 12, 0, 0).unwrap());
+        let mfile = dir.path().join(format!("{}.ics", master.uid));
+        fs::write(&mfile, render_ics(&master, Tz::Asia__Shanghai).unwrap()).unwrap();
+        // 旧式：独立文件 + RECURRENCE-ID + 文件内 UID = 母 UID。
+        let mut ov = master.clone();
+        ov.uid = "legacy-ov".to_string();
+        ov.parent_uid = Some(master.uid.clone());
+        ov.recurrence_id = Some(Utc.with_ymd_and_hms(2026, 9, 16, 12, 0, 0).unwrap());
+        ov.rrule = None;
+        fs::write(
+            dir.path().join("legacy-ov.ics"),
+            render_ics(&ov, Tz::Asia__Shanghai).unwrap(),
+        )
+        .unwrap();
+
+        let st = IcsStorage::open(dir.path(), Tz::Asia__Shanghai).unwrap();
+        assert_eq!(st.list().len(), 2);
+        let exc = st
+            .list()
+            .iter()
+            .find(|t| t.recurrence_id.is_some())
+            .unwrap();
+        assert_eq!(exc.uid, "legacy-ov"); // 独立文件键 = 自己的文件名
+        assert_eq!(exc.parent_uid.as_deref(), Some(master.uid.as_str()));
     }
 }
 

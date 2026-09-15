@@ -1,6 +1,5 @@
 //! State manager for `.calman-state.json` (version, uid_counter, last_modified).
-//!
-//! Layout per DESIGN.md §2.3.
+//! 状态文件记录：版本号、已分配的 UID 计数器（生成不重复短 ID）、上次修改时间。
 
 use super::atomic_write;
 use anyhow::{Context, Result};

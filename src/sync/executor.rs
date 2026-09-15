@@ -1,6 +1,8 @@
 //! Sync executor: runs `pre_hook` → `cmd` → `post_hook`; lock + short-circuit.
 //!
-//! Flow per DESIGN.md §3.1: skip if `.sync.lock` exists, create lock, run hooks
+//! 完整流程：`.sync.lock` 存在则跳过 → 原子创建锁 → 依次运行钩子 →
+//! 任一非零退出即中止整条链 → 删除锁，由调用方更新状态。
+//! Flow: skip if `.sync.lock` exists, create lock, run hooks
 //! sequentially, abort on first non-zero exit, remove lock, caller updates state.
 
 use crate::config::SyncConfig;

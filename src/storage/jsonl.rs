@@ -1,6 +1,5 @@
 //! JSONL storage backend (`tasks.jsonl`, atomic write via tmp+rename).
-//!
-//! Layout per DESIGN.md §2.2.A: one JSON object per line.
+//! 数据布局：每行一个 JSON 对象（一个任务），空行忽略，读取时逐行解析。
 
 use super::{Storage, atomic_write};
 use crate::model::Task;
