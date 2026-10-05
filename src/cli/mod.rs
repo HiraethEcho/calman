@@ -181,14 +181,38 @@ pub fn resolve_sources(
     override_: Option<&[String]>,
     ctx: ContextKind,
 ) -> Result<Vec<Source>> {
+    let mut out = Vec::new();
+    for src in resolve_sources_exact(conf, override_, ctx)? {
+        if src.source_type == SourceType::IcsDir {
+            out.extend(source::expand_ics_dir(&src)?);
+        } else {
+            out.push(src);
+        }
+    }
+    if out.is_empty() {
+        bail!("no sources selected");
+    }
+    Ok(out)
+}
+
+/// Resolve the effective source list **without** expanding `IcsDir` sources.
+///
+/// An `IcsDir` source stays a single entry pointing at its root, so
+/// whole-source operations (e.g. `sync`) run once instead of once per
+/// discovered collection. Composite references (`source:name/collection`) still
+/// resolve to that one collection.
+pub fn resolve_sources_exact(
+    conf: &Config,
+    override_: Option<&[String]>,
+    ctx: ContextKind,
+) -> Result<Vec<Source>> {
     let names: Vec<String> = match override_ {
         Some(ns) => ns.to_vec(),
         None => conf.context_sources(ctx),
     };
     let mut out = Vec::new();
     for name in names {
-        let resolved = source::resolve_source_name(&conf.sources, &name)?;
-        out.extend(resolved);
+        out.push(source::resolve_source_name_single(&conf.sources, &name)?);
     }
     if out.is_empty() {
         bail!("no sources selected");
@@ -652,11 +676,11 @@ pub fn resolve_occurrence_date(t: &Task, date: DateTime<Utc>) -> Result<DateTime
 
 /// Resolve a source name to its concrete `Source`, including composite
 /// `ics-dir` references (`remote/sorge` → virtual `ics` source).
+///
+/// A bare `ics-dir` name resolves to the `IcsDir` source itself, never to one
+/// of its collections; callers that need storage reject it with a clear error.
 pub fn resolve_source(conf: &Config, name: &str) -> Result<Source> {
-    let mut resolved = source::resolve_source_name(&conf.sources, name)?;
-    resolved
-        .pop()
-        .ok_or_else(|| anyhow::anyhow!("unknown source `{name}`"))
+    source::resolve_source_name_single(&conf.sources, name)
 }
 
 /// Resolve ID arguments to `(uid, source_name)` pairs.

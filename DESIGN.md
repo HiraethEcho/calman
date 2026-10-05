@@ -111,6 +111,7 @@ pub enum TaskStatus { Pending, InProgress, Completed, Cancelled }
 
 ### 2.3 Metadata File
 - **File**: `<location>/.calman-state.json`
+- **Applies to**: `jsonl` and `ics` source locations. An `ics‑dir` root holds collections, not items, so no metadata file is written there.
 - **Content**:
     ```json
     {
@@ -127,6 +128,11 @@ pub enum TaskStatus { Pending, InProgress, Completed, Cancelled }
 ## 3. Synchronisation Mechanism (Sync)
 
 ### 3.1 Execution Flow
+
+An `ics‑dir` source is **not** expanded into its collections. It syncs once at
+its root, and `{location}` is that root. To sync one collection instead, name it
+explicitly with `source:<name>/<collection>`.
+
 1.  Resolve the target source list (`source:` attribute takes precedence; otherwise use `contexts.sync`; fallback to all sync‑enabled sources).
 2.  For each source:
     a. Check if `location/.sync.lock` exists; if yes, skip and warn.
@@ -134,7 +140,7 @@ pub enum TaskStatus { Pending, InProgress, Completed, Cancelled }
     c. Execute sequentially: `pre_hook` → `cmd` → `post_hook`.
     d. If `pre_hook` or `cmd` exits with a non‑zero code, **terminate immediately**, delete the lock file, and report error.
     e. Delete the lock file.
-    f. Update `last_modified` in `.calman-state.json`.
+    f. Update `last_modified` in `.calman-state.json`. An `ics‑dir` root is skipped: it holds collections, not items, so no metadata file is written there.
 
 ### 3.2 Conflict Resolution Strategy
 - **calman does not resolve conflicts**.

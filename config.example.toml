@@ -62,6 +62,7 @@ type = "ics-dir"
 location = "~/.contacts/radicale"
 # 递归发现子目录里的 item.ics; collection 名 = 相对 location 的目录路径
 # 引用: source:work/collection 或 source:personal/"My Calendars"
+# sync: 整个 ics-dir 只跑一次 (cwd 与 {location} = location 根目录), 不按 collection 各跑一次
 
 # 报告 / 图标 → report.example.toml
 # 行级颜色规则 → colorscheme.example.toml ([colorscheme] / [colorscheme.rules.*])

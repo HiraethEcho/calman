@@ -203,3 +203,47 @@ fn done_occurrence_writes_ios_style_completed_copy_and_rolls_master() {
     assert_eq!(master_due - copy_due, chrono::Duration::days(1));
 }
 
+
+#[test]
+fn sync_ics_dir_runs_once_at_root_without_state_file() {
+    let dir = tempdir().unwrap();
+    let home = dir.path();
+    let cfg_dir = home.join(".config").join("calman");
+    std::fs::create_dir_all(&cfg_dir).unwrap();
+    let ics_root = dir.path().join("ics");
+    for coll in ["bar", "dev", "loisir"] {
+        std::fs::create_dir_all(ics_root.join(coll)).unwrap();
+        std::fs::write(ics_root.join(coll).join("a.ics"), "").unwrap();
+    }
+    std::fs::write(
+        cfg_dir.join("config.toml"),
+        format!(
+            "[contexts]\nsync = [\"remote\"]\n\
+             [[source]]\nname = \"remote\"\ntype = \"ics-dir\"\nlocation = \"{}\"\n\
+             [source.sync]\ncmd = \"pwd >> $HOME/runs.txt\"\n",
+            ics_root.display()
+        ),
+    )
+    .unwrap();
+
+    let (out, ok) = calman(home, &["sync"]);
+    assert!(ok, "sync failed: {out}");
+
+    // One run, not one per collection.
+    let runs = std::fs::read_to_string(home.join("runs.txt")).unwrap();
+    assert_eq!(runs.lines().count(), 1, "expected one run, got:\n{runs}");
+
+    // The command runs with the source root as its working directory.
+    assert_eq!(
+        std::fs::canonicalize(runs.trim()).unwrap(),
+        std::fs::canonicalize(&ics_root).unwrap(),
+    );
+
+    // Reported once, under the configured source name.
+    assert!(out.contains("synced `remote`"), "unexpected output: {out}");
+
+    // No metadata file dropped into the vdir data tree.
+    assert!(!ics_root.join(".calman-state.json").exists());
+    // Lock is released after a successful run.
+    assert!(!ics_root.join(".sync.lock").exists());
+}

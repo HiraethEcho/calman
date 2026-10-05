@@ -140,37 +140,51 @@ pub fn expand_ics_dir(source: &Source) -> Result<Vec<Source>> {
         .collect())
 }
 
-/// Resolve a source name that may be a composite reference (e.g. `personal/calendars`).
+/// Resolve a source name to exactly one `Source`, **without** expanding `IcsDir`.
 ///
-/// - If `name` contains `/` and matches an `IcsDir` collection → single virtual source
-/// - If `name` matches an `IcsDir` source → expand all collections
-/// - If `name` matches a regular source → return as-is
-pub fn resolve_source_name(sources: &[Source], name: &str) -> Result<Vec<Source>> {
-    // Check if it's a composite reference
+/// - If `name` contains `/` and matches an `IcsDir` collection → that virtual
+///   `Ics` source (inheriting the parent's `sync`).
+/// - If `name` matches an `IcsDir` source → the `IcsDir` source itself.
+/// - If `name` matches a regular source → that source.
+///
+/// Use this for operations that act on a configured source as a whole (e.g.
+/// `sync`), where expanding into one run per collection would repeat the same
+/// command.
+pub fn resolve_source_name_single(sources: &[Source], name: &str) -> Result<Source> {
+    // Composite reference (`personal/calendars`)
     if let Some((source_name, collection)) = parse_source_ref(name) {
         if let Some(parent) = sources.iter().find(|s| s.name == source_name)
             && parent.source_type == SourceType::IcsDir
             && let Some(path) = resolve_collection_path(parent, &collection)?
         {
-            return Ok(vec![Source {
+            return Ok(Source {
                 name: name.to_string(),
                 source_type: SourceType::Ics,
                 location: path.to_string_lossy().to_string(),
                 sync: parent.sync.clone(),
-            }]);
+            });
         }
         anyhow::bail!("unknown source `{name}`");
     }
 
-    // Direct source lookup
-    if let Some(src) = sources.iter().find(|s| s.name == *name) {
-        if src.source_type == SourceType::IcsDir {
-            expand_ics_dir(src)
-        } else {
-            Ok(vec![src.clone()])
-        }
+    sources
+        .iter()
+        .find(|s| s.name == *name)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("unknown source `{name}`"))
+}
+
+/// Resolve a source name to one or more concrete sources.
+///
+/// - If `name` contains `/` and matches an `IcsDir` collection → single virtual source
+/// - If `name` matches an `IcsDir` source → expand all collections
+/// - If `name` matches a regular source → return as-is
+pub fn resolve_source_name(sources: &[Source], name: &str) -> Result<Vec<Source>> {
+    let src = resolve_source_name_single(sources, name)?;
+    if src.source_type == SourceType::IcsDir {
+        expand_ics_dir(&src)
     } else {
-        anyhow::bail!("unknown source `{name}`");
+        Ok(vec![src])
     }
 }
 
@@ -317,6 +331,41 @@ mod tests {
         let resolved = resolve_source_name(&sources, "work").unwrap();
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].name, "work");
+    }
+
+    #[test]
+    fn resolve_source_name_single_keeps_ics_dir() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("calendars")).unwrap();
+        fs::write(root.join("calendars/event1.ics"), "BEGIN:VCALENDAR...").unwrap();
+        fs::create_dir_all(root.join("tasks")).unwrap();
+        fs::write(root.join("tasks/task1.ics"), "BEGIN:VCALENDAR...").unwrap();
+
+        let source = make_ics_dir_source("personal", root.to_str().unwrap());
+        let sources = vec![source.clone()];
+
+        let resolved = resolve_source_name_single(&sources, "personal").unwrap();
+        assert_eq!(resolved.name, "personal");
+        assert_eq!(resolved.source_type, SourceType::IcsDir);
+        assert_eq!(resolved.location, source.location);
+    }
+
+    #[test]
+    fn resolve_source_name_single_composite_stays_one() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("calendars")).unwrap();
+        fs::write(root.join("calendars/event1.ics"), "BEGIN:VCALENDAR...").unwrap();
+
+        let source = make_ics_dir_source("personal", root.to_str().unwrap());
+        let sources = vec![source];
+
+        let resolved = resolve_source_name_single(&sources, "personal/calendars").unwrap();
+        assert_eq!(resolved.name, "personal/calendars");
+        assert_eq!(resolved.source_type, SourceType::Ics);
     }
 
     #[test]
